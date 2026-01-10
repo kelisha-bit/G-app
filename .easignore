@@ -1,0 +1,41 @@
+# Exclude these files from EAS builds
+node_modules/
+.expo/
+.expo-shared/
+dist/
+.git/
+.vscode/
+*.log
+.DS_Store
+.env.local
+.env.*.local
+
+# Documentation (not needed in builds)
+*.md
+!README.md
+
+# Test files
+**/__tests__/
+**/*.test.js
+**/*.spec.js
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+
+
+
+
+
+
+
+
+
+
+
+
+

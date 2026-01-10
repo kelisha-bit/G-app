@@ -1,0 +1,188 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    match /events/{eventId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /sermons/{sermonId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /checkIns/{checkInId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+    
+    match /prayerRequests/{requestId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      // Allow update by owner/admin, or by any authenticated user (for prayer count tracking)
+      // App code ensures only prayers and prayedBy fields are updated by non-owners
+      allow update: if request.auth != null;
+      allow delete: if isAdmin();
+    }
+    
+    match /departments/{deptId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if request.auth != null;
+    }
+    
+    match /ministries/{ministryId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if request.auth != null;
+    }
+    
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /donations/{donationId} {
+      allow read: if request.auth != null && (isAdmin() || (resource != null && isOwner(resource.data.userId)));
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+    
+    match /giving/{givingId} {
+      allow read: if request.auth != null && (isAdmin() || (resource != null && isOwner(resource.data.userId)));
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+    
+    match /eventRegistrations/{registrationId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow delete: if isAdmin();
+    }
+    
+    match /volunteerOpportunities/{opportunityId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /volunteerApplications/{applicationId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if isAdmin();
+    }
+    
+    match /devotionals/{devotionalId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /devotionalBookmarks/{bookmarkId} {
+      allow read: if request.auth != null && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource != null && resource.data.userId == request.auth.uid;
+    }
+    
+    match /devotionalNotes/{noteId} {
+      allow read: if request.auth != null && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource != null && resource.data.userId == request.auth.uid;
+    }
+    
+    match /messages/{messageId} {
+      // Allow read if user is authenticated and is the recipient, sender, or admin
+      allow read: if request.auth != null && (
+        (resource != null && resource.data.toUserId == request.auth.uid) ||
+        (resource != null && resource.data.fromUserId == request.auth.uid) ||
+        isAdmin()
+      );
+      // Allow create if user is the sender or admin
+      allow create: if request.auth != null && (
+        request.resource.data.fromUserId == request.auth.uid || 
+        isAdmin()
+      );
+      // Allow update if user is the recipient (to mark as read) or admin
+      allow update: if request.auth != null && (
+        (resource != null && resource.data.toUserId == request.auth.uid) || 
+        isAdmin()
+      );
+      // Allow delete if user is the recipient or admin
+      allow delete: if request.auth != null && (
+        (resource != null && resource.data.toUserId == request.auth.uid) || 
+        isAdmin()
+      );
+    }
+    
+    // Sermon Notes - users can only read/write their own notes
+    match /sermonNotes/{noteId} {
+      allow read: if request.auth != null && (
+        resource == null || resource.data.userId == request.auth.uid
+      );
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && 
+        resource != null && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && 
+        resource != null && resource.data.userId == request.auth.uid;
+    }
+    
+    // Small Groups - public read, authenticated users can join/leave and create fallback groups
+    match /smallGroups/{groupId} {
+      allow read: if true;
+      allow create: if request.auth != null; // Allow authenticated users to create fallback groups
+      allow delete: if isAdmin();
+      allow update: if request.auth != null;
+    }
+    
+    // Photo Albums - public read, authenticated users can upload photos
+    match /photoAlbums/{albumId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if request.auth != null; // Users can add photos
+    }
+    
+    // Children Check-Ins - parents can read their own, admins can read all
+    match /childrenCheckIns/{checkInId} {
+      // Allow read if user is authenticated and is the parent, or if admin
+      // For queries, Firestore checks each document - this allows documents where parentId matches
+      allow read: if request.auth != null && (
+        resource.data.parentId == request.auth.uid || 
+        isAdmin()
+      );
+      allow create: if request.auth != null && 
+        request.resource.data.parentId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+    
+    // Parent Resources - public read, admin write
+    match /parentResources/{resourceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Settings - public read, admin write (for app-wide settings like banner image)
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}
+

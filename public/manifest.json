@@ -1,0 +1,27 @@
+{
+  "short_name": "GWCC",
+  "name": "Greater Works City Church",
+  "description": "Greater Works City Church mobile app - Connect with your church community, access sermons, events, and more.",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/assets/assets/icon.d02dbe2552967e6b8b63ccc9585901cf.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#6366f1",
+  "background_color": "#6366f1",
+  "orientation": "portrait",
+  "scope": "/",
+  "lang": "en",
+  "dir": "ltr"
+}
+
