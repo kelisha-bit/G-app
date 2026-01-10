@@ -8,13 +8,16 @@ import {
   Switch,
   Alert,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../../firebase.config';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PrivacyScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [privacySettings, setPrivacySettings] = useState({
     profileVisibility: 'public', // public, members, private
@@ -145,20 +148,35 @@ export default function PrivacyScreen({ navigation }) {
     );
   };
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6366f1" />
+        <Text style={styles.loadingText}>Loading privacy settings...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#6366f1', '#8b5cf6']} style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Privacy</Text>
-        <View style={{ width: 40 }} />
+        <View style={styles.headerTop}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Privacy</Text>
+          <View style={{ width: 40 }} />
+        </View>
       </LinearGradient>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.infoCard}>
           <Ionicons name="lock-closed" size={32} color="#8b5cf6" />
           <Text style={styles.infoTitle}>Your Privacy Matters</Text>
@@ -267,13 +285,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f9fafb',
   },
-  header: {
-    flexDirection: 'row',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor: '#f9fafb',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  header: {
     paddingTop: 50,
     paddingBottom: 20,
     paddingHorizontal: 20,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   backButton: {
     width: 40,
@@ -446,5 +480,4 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
 });
-
 
