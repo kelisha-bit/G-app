@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { db } from '../../firebase.config';
+import { auth, db } from '../../firebase.config';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 export default function DirectoryScreen({ navigation }) {
@@ -41,17 +41,48 @@ export default function DirectoryScreen({ navigation }) {
         setLoading(true);
       }
       
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('Error', 'You must be logged in to view the directory.');
+        setMembers([]);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+      
       const q = query(collection(db, 'users'), orderBy('displayName', 'asc'));
       const querySnapshot = await getDocs(q);
       const membersList = [];
       
       querySnapshot.forEach((doc) => {
         const data = doc.data();
+        const privacySettings = data.privacySettings || {};
+        const profileVisibility = privacySettings.profileVisibility || 'public';
+        const allowDirectoryListing = privacySettings.allowDirectoryListing !== false; // default to true
+        
+        // Skip if directory listing is disabled
+        if (!allowDirectoryListing) {
+          return;
+        }
+        
+        // Skip if profile is private and not the current user's profile
+        if (profileVisibility === 'private' && doc.id !== currentUser.uid) {
+          return;
+        }
+        
+        // Skip if profile is members-only and user is not authenticated (already checked above)
+        // For now, if profileVisibility is 'members', we allow all authenticated users
+        // If you want stricter control, you could check if user has a role or is a verified member
+        
+        // Respect privacy settings for individual fields
+        const showEmail = privacySettings.showEmail !== false; // default to true
+        const showPhone = privacySettings.showPhone === true; // default to false
+        
         membersList.push({
           id: doc.id,
           name: data.displayName || 'Unknown',
-          email: data.email || '',
-          phone: data.phoneNumber || data.phone || '',
+          email: showEmail ? (data.email || '') : '',
+          phone: showPhone ? (data.phoneNumber || data.phone || '') : '',
           role: data.role || 'member',
           category: data.role === 'admin' ? 'Admin' : 'Member',
           departments: data.departments || [],
@@ -59,6 +90,7 @@ export default function DirectoryScreen({ navigation }) {
           bio: data.bio || '',
           joinDate: data.createdAt || '',
           profilePicture: data.profilePicture || data.photoURL || data.profileImage || null,
+          isCurrentUser: doc.id === currentUser.uid,
         });
       });
       
@@ -204,7 +236,9 @@ export default function DirectoryScreen({ navigation }) {
             </View>
           )}
         </View>
-        <Text style={styles.personEmail}>{person.email}</Text>
+        {person.email && (
+          <Text style={styles.personEmail}>{person.email}</Text>
+        )}
         {person.phone && (
           <Text style={styles.personPhone}>📱 {person.phone}</Text>
         )}
@@ -416,21 +450,23 @@ export default function DirectoryScreen({ navigation }) {
                   </View>
                 )}
 
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Contact Information</Text>
-                  {selectedMember.email && (
-                    <View style={styles.detailRow}>
-                      <Ionicons name="mail" size={20} color="#6366f1" />
-                      <Text style={styles.detailText}>{selectedMember.email}</Text>
-                    </View>
-                  )}
-                  {selectedMember.phone && (
-                    <View style={styles.detailRow}>
-                      <Ionicons name="call" size={20} color="#6366f1" />
-                      <Text style={styles.detailText}>{selectedMember.phone}</Text>
-                    </View>
-                  )}
-                </View>
+                {(selectedMember.email || selectedMember.phone) && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailLabel}>Contact Information</Text>
+                    {selectedMember.email && (
+                      <View style={styles.detailRow}>
+                        <Ionicons name="mail" size={20} color="#6366f1" />
+                        <Text style={styles.detailText}>{selectedMember.email}</Text>
+                      </View>
+                    )}
+                    {selectedMember.phone && (
+                      <View style={styles.detailRow}>
+                        <Ionicons name="call" size={20} color="#6366f1" />
+                        <Text style={styles.detailText}>{selectedMember.phone}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
 
                 {selectedMember.departments && selectedMember.departments.length > 0 && (
                   <View style={styles.detailSection}>
