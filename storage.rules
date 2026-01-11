@@ -14,9 +14,9 @@ service firebase.storage {
     }
     
     // Profile pictures - users can upload their own, everyone can read
-    match /profilePictures/{userId} {
-      allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == userId;
+    match /profilePictures/{userId}/{allPaths=**} {
+      allow read: if true;  // Anyone can view profile pictures
+      allow write: if request.auth != null && request.auth.uid == userId;  // Users can only upload to their own folder
     }
     
     // Sermons - authenticated users can upload, everyone can read

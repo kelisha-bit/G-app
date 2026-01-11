@@ -423,6 +423,7 @@ export default function HomeScreen({ navigation }) {
     { id: 11, title: 'Directory', icon: 'people', color: '#8b5cf6', screen: 'Directory' },
     { id: 12, title: 'Volunteer', icon: 'hand-right', color: '#f59e0b', screen: 'Volunteer' },
     { id: 13, title: 'Messages', icon: 'chatbubbles', color: '#6366f1', screen: 'Messages' },
+    { id: 14, title: 'Resources', icon: 'library', color: '#f59e0b', screen: 'Resources' },
   ];
 
   return (

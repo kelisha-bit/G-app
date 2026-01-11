@@ -183,6 +183,61 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    
+    // Resources - public read, admin write (authenticated users can update downloads)
+    match /resources/{resourceId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      // Allow authenticated users to update (for download tracking via increment)
+      allow update: if request.auth != null;
+    }
+    
+    // Resource Access - for tracking user downloads (optional)
+    match /resourceAccess/{accessId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null;
+    }
+    
+    // Courses - public read, admin write (users update their own progress via users collection)
+    match /courses/{courseId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Training Materials - public read, admin write
+    match /trainingMaterials/{materialId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Training Forums - authenticated users can read and create, can update their own posts
+    match /trainingForums/{forumId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.authorId == request.auth.uid;
+      allow update: if request.auth != null && (
+        resource.data.authorId == request.auth.uid || 
+        isAdmin()
+      );
+      allow delete: if request.auth != null && (
+        resource.data.authorId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+    
+    // Assignments - users can read their own, admin can write/update
+    match /assignments/{assignmentId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
+      allow create: if isAdmin();
+      allow update: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
   }
 }
 

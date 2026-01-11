@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +28,10 @@ export default function EditProfileScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // Refs for scrolling
+  const scrollViewRef = useRef(null);
+  const bioInputRef = useRef(null);
+
   // Profile data
   const [displayName, setDisplayName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -36,6 +42,37 @@ export default function EditProfileScreen({ navigation }) {
 
   useEffect(() => {
     loadUserProfile();
+    
+    // Keyboard listeners to handle scrolling for bio field
+    const keyboardWillShowListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        // Only handle if bio input is likely focused
+        setTimeout(() => {
+          if (bioInputRef.current && scrollViewRef.current) {
+            bioInputRef.current.measureInWindow((x, y, width, height) => {
+              const keyboardHeight = e.endCoordinates.height;
+              const screenHeight = Dimensions.get('window').height;
+              const inputBottom = y + height;
+              const visibleAreaBottom = screenHeight - keyboardHeight;
+              
+              // If input would be covered by keyboard, scroll to make it visible
+              if (inputBottom > visibleAreaBottom - 20) {
+                const scrollOffset = inputBottom - visibleAreaBottom + 30;
+                scrollViewRef.current.scrollTo({
+                  y: scrollOffset,
+                  animated: true,
+                });
+              }
+            });
+          }
+        }, Platform.OS === 'ios' ? 100 : 50);
+      }
+    );
+
+    return () => {
+      keyboardWillShowListener?.remove();
+    };
   }, []);
 
   const loadUserProfile = async () => {
@@ -95,12 +132,20 @@ export default function EditProfileScreen({ navigation }) {
     try {
       setUploading(true);
       
+      // Verify user is authenticated
+      if (!user || !user.uid) {
+        throw new Error('User not authenticated. Please log in again.');
+      }
+      
       // Convert image to blob
       const response = await fetch(uri);
+      if (!response.ok) {
+        throw new Error('Failed to fetch image');
+      }
       const blob = await response.blob();
 
-      // Create storage reference
-      const storageRef = ref(storage, `profiles/${user.uid}/profile.jpg`);
+      // Create storage reference - using profilePictures path to match storage rules
+      const storageRef = ref(storage, `profilePictures/${user.uid}/profile.jpg`);
 
       // Upload image
       await uploadBytes(storageRef, blob);
@@ -109,10 +154,47 @@ export default function EditProfileScreen({ navigation }) {
       const downloadURL = await getDownloadURL(storageRef);
       
       setPhotoURL(downloadURL);
+      
+      // Update Firestore immediately with both photoURL and profilePicture fields
+      const userRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userRef);
+      
+      const updateData = {
+        photoURL: downloadURL,
+        profilePicture: downloadURL, // Also save as profilePicture for DirectoryScreen
+        updatedAt: new Date().toISOString(),
+      };
+      
+      if (userDoc.exists()) {
+        await updateDoc(userRef, updateData);
+      } else {
+        // If user document doesn't exist yet, create it with basic info
+        await setDoc(userRef, {
+          ...updateData,
+          displayName: displayName || user.displayName || '',
+          email: user.email,
+          createdAt: new Date().toISOString(),
+          role: 'member',
+        });
+      }
+      
+      // Also update Firebase Auth profile
+      await updateProfile(user, {
+        photoURL: downloadURL,
+      });
+      
       Alert.alert('Success', 'Profile photo uploaded successfully!');
     } catch (error) {
       console.error('Error uploading image:', error);
-      Alert.alert('Error', 'Failed to upload photo. Please try again.');
+      let errorMessage = 'Failed to upload photo. Please try again.';
+      if (error.code === 'storage/unauthorized') {
+        errorMessage = 'You do not have permission to upload photos. Please check your account permissions.';
+      } else if (error.code === 'storage/quota-exceeded') {
+        errorMessage = 'Storage quota exceeded. Please contact support.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      Alert.alert('Error', errorMessage);
     } finally {
       setUploading(false);
     }
@@ -142,6 +224,7 @@ export default function EditProfileScreen({ navigation }) {
         phoneNumber: phoneNumber.trim(),
         bio: bio.trim(),
         photoURL: photoURL,
+        profilePicture: photoURL, // Also save as profilePicture for DirectoryScreen compatibility
         address: address.trim(),
         dateOfBirth: dateOfBirth.trim(),
         email: user.email,
@@ -182,6 +265,11 @@ export default function EditProfileScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
       <LinearGradient colors={['#6366f1', '#8b5cf6']} style={styles.header}>
         <View style={styles.headerTop}>
           <TouchableOpacity
@@ -195,16 +283,15 @@ export default function EditProfileScreen({ navigation }) {
         </View>
       </LinearGradient>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      <ScrollView 
+        ref={scrollViewRef}
+        style={styles.content}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        nestedScrollEnabled={true}
       >
-        <ScrollView 
-          style={styles.content} 
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
         {/* Profile Photo Section */}
         <View style={styles.photoSection}>
           <View style={styles.photoContainer}>
@@ -312,7 +399,11 @@ export default function EditProfileScreen({ navigation }) {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Bio</Text>
-            <View style={[styles.inputContainer, styles.textAreaContainer]}>
+            <View 
+              ref={bioInputRef}
+              style={[styles.inputContainer, styles.textAreaContainer]}
+              collapsable={false}
+            >
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={bio}
@@ -322,6 +413,27 @@ export default function EditProfileScreen({ navigation }) {
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
+                onFocus={() => {
+                  // Trigger keyboard show event which will handle scrolling
+                  setTimeout(() => {
+                    if (bioInputRef.current && scrollViewRef.current) {
+                      bioInputRef.current.measureInWindow((x, y, width, height) => {
+                        const { height: screenHeight } = Dimensions.get('window');
+                        const estimatedKeyboardHeight = Platform.OS === 'ios' ? 300 : 250;
+                        const visibleAreaBottom = screenHeight - estimatedKeyboardHeight;
+                        const inputBottom = y + height;
+                        
+                        if (inputBottom > visibleAreaBottom) {
+                          const scrollOffset = inputBottom - visibleAreaBottom + 40;
+                          scrollViewRef.current.scrollTo({
+                            y: scrollOffset,
+                            animated: true,
+                          });
+                        }
+                      });
+                    }
+                  }, Platform.OS === 'ios' ? 300 : 200);
+                }}
               />
             </View>
           </View>
@@ -350,7 +462,7 @@ export default function EditProfileScreen({ navigation }) {
           </LinearGradient>
         </TouchableOpacity>
 
-        <View style={{ height: 30 }} />
+        <View style={{ height: 200 }} />
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -393,6 +505,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 400,
+    flexGrow: 1,
   },
   photoSection: {
     alignItems: 'center',

@@ -400,10 +400,32 @@ Your app already has a solid foundation with:
 - Localized content
 
 ### 18. **🎯 Goals / Challenges Screen**
-- Reading challenges
-- Prayer challenges
-- Service challenges
-- Progress tracking
+**Priority**: ⭐⭐  
+**Impact**: Medium
+
+**Features**:
+- Bible reading challenges (30-day, 90-day, 365-day plans)
+- Prayer challenges (daily prayer streaks, prayer partner commitments)
+- Service/volunteer challenges (service hour goals, ministry participation)
+- Community challenges (church-wide goals, small group challenges)
+- Personal spiritual goals (scripture memory, devotional consistency)
+- Progress tracking with visual indicators (charts, streaks, completion percentages)
+- Achievement badges and milestones
+- Challenge history and completed challenges
+- Set custom personal goals
+- Reminders and notifications
+- Share progress with accountability partners
+- Leaderboards (optional, opt-in)
+- Challenge categories and difficulty levels
+
+**Why**: Motivates consistent spiritual practices, gamification increases engagement, accountability through progress sharing, builds community through shared challenges
+
+**Integration Points**:
+- Link from Bible Reading screen (reading challenges)
+- Link from Prayer screen (prayer challenges)
+- Link from Volunteer screen (service challenges)
+- Link from Profile (personal goals overview)
+- Link from Home (active challenges)
 
 ### 19. **📈 Analytics Dashboard (Member View)**
 - Personal growth metrics

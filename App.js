@@ -46,6 +46,8 @@ import NotificationScreen from './src/screens/NotificationScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import AboutScreen from './src/screens/AboutScreen';
+import ResourcesScreen from './src/screens/ResourcesScreen';
+import DiscipleshipTrainingScreen from './src/screens/DiscipleshipTrainingScreen';
 import AdminDashboardScreen from './src/screens/admin/AdminDashboardScreen';
 import ManageMembersScreen from './src/screens/admin/ManageMembersScreen';
 import ManageEventsScreen from './src/screens/admin/ManageEventsScreen';
@@ -56,6 +58,7 @@ import ManageVolunteersScreen from './src/screens/admin/ManageVolunteersScreen';
 import MemberActivityScreen from './src/screens/admin/MemberActivityScreen';
 import ReportsScreen from './src/screens/admin/ReportsScreen';
 import ManageBannerScreen from './src/screens/admin/ManageBannerScreen';
+import ManageResourcesScreen from './src/screens/admin/ManageResourcesScreen';
 import AdminSettingsScreen from './src/screens/admin/AdminSettingsScreen';
 
 const Stack = createStackNavigator();
@@ -116,6 +119,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigationRef = useNavigationContainerRef();
+  const [navigationReady, setNavigationReady] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -144,18 +148,18 @@ export default function App() {
     };
   }, []);
 
-  // Setup notification listeners after navigation is ready
+  // Setup notification listeners after navigation is ready and user is logged in
   useEffect(() => {
-    if (user && navigationRef.isReady()) {
+    if (user && navigationReady && navigationRef) {
       notificationService.setupNotificationListeners(navigationRef);
     }
 
     return () => {
-      if (navigationRef.isReady()) {
+      if (navigationReady) {
         notificationService.removeNotificationListeners();
       }
     };
-  }, [user, navigationRef]);
+  }, [user, navigationReady]);
 
   if (loading) {
     return null; // Or a loading screen
@@ -165,7 +169,10 @@ export default function App() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <StatusBar style="auto" />
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer 
+          ref={navigationRef}
+          onReady={() => setNavigationReady(true)}
+        >
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             {!user ? (
               <>
@@ -199,6 +206,8 @@ export default function App() {
                 <Stack.Screen name="Privacy" component={PrivacyScreen} />
                 <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
                 <Stack.Screen name="About" component={AboutScreen} />
+                <Stack.Screen name="Resources" component={ResourcesScreen} />
+                <Stack.Screen name="DiscipleshipTraining" component={DiscipleshipTrainingScreen} />
                 <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
                 <Stack.Screen name="ManageMembers" component={ManageMembersScreen} />
                 <Stack.Screen name="ManageEvents" component={ManageEventsScreen} />
@@ -209,6 +218,7 @@ export default function App() {
                 <Stack.Screen name="MemberActivity" component={MemberActivityScreen} />
                 <Stack.Screen name="Reports" component={ReportsScreen} />
                 <Stack.Screen name="ManageBanner" component={ManageBannerScreen} />
+                <Stack.Screen name="ManageResources" component={ManageResourcesScreen} />
                 <Stack.Screen name="AdminSettings" component={AdminSettingsScreen} />
               </>
             )}

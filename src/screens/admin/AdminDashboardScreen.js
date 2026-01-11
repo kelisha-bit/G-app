@@ -380,6 +380,7 @@ export default function AdminDashboardScreen({ navigation }) {
     { id: 10, title: 'Ministries', icon: 'sparkles', color: '#ec4899', screen: 'Ministries' },
     { id: 11, title: 'Giving', icon: 'heart', color: '#ef4444', screen: 'Giving' },
     { id: 12, title: 'Manage Banner', icon: 'image', color: '#ec4899', screen: 'ManageBanner' },
+    { id: 13, title: 'Resources', icon: 'library', color: '#14b8a6', screen: 'ManageResources' },
   ];
 
   const handleSettingsPress = () => {

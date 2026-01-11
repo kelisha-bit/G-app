@@ -12,6 +12,8 @@ import {
   TextInput,
   Modal,
   Linking,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +28,7 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { db, auth } from '../../firebase.config';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ageGroups = [
   {
@@ -73,6 +76,7 @@ const ageGroups = [
 export default function FamilyMinistryScreen({ navigation, route }) {
   // Ensure route object has expected structure for React Navigation
   const safeRoute = route || { params: {}, index: 0 };
+  const insets = useSafeAreaInsets();
   
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
@@ -668,15 +672,23 @@ export default function FamilyMinistryScreen({ navigation, route }) {
         ))}
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        {activeTab === 'overview' && renderOverview()}
-        {activeTab === 'checkin' && renderCheckIn()}
-        {activeTab === 'resources' && renderResources()}
-        {activeTab === 'volunteer' && renderVolunteer()}
-      </ScrollView>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          keyboardShouldPersistTaps="handled"
+        >
+          {activeTab === 'overview' && renderOverview()}
+          {activeTab === 'checkin' && renderCheckIn()}
+          {activeTab === 'resources' && renderResources()}
+          {activeTab === 'volunteer' && renderVolunteer()}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Check-In Modal */}
       <Modal
@@ -685,8 +697,13 @@ export default function FamilyMinistryScreen({ navigation, route }) {
         transparent={true}
         onRequestClose={() => setCheckInModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Check-In Child</Text>
               <TouchableOpacity onPress={() => setCheckInModalVisible(false)}>
@@ -694,7 +711,12 @@ export default function FamilyMinistryScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalBody}>
+            <ScrollView 
+              style={styles.modalBody}
+              contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Select Age Group *</Text>
                 <View style={styles.ageGroupSelector}>
@@ -807,7 +829,8 @@ export default function FamilyMinistryScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

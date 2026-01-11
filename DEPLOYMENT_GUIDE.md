@@ -351,6 +351,51 @@ eas build:list
 - If persistent: Check for large files in project
 - Ensure `.easignore` or `.gitignore` excludes unnecessary files
 
+**Issue: "Failed to upload the project tarball to EAS Build" / "write ECONNRESET"**
+- **Cause:** Network connection reset during upload phase
+- **Solutions (try in order):**
+  1. **Retry the build** (most common fix):
+     ```bash
+     eas build --platform android --profile preview
+     ```
+     Network issues are often temporary - retry usually works
+  
+  2. **Check your internet connection:**
+     - Ensure stable internet connection (prefer wired over WiFi if possible)
+     - Test connection: `ping google.com`
+     - Try from a different network if available
+  
+  3. **Disable VPN/Proxy** (if using):
+     - VPNs can interfere with uploads to Google Cloud Storage
+     - Temporarily disable VPN and retry
+  
+  4. **Check firewall/antivirus:**
+     - Temporarily disable firewall/antivirus
+     - Add exception for Node.js/EAS CLI
+     - Windows Firewall: Allow Node.js through firewall
+  
+  5. **Use a different network:**
+     - Switch from WiFi to mobile hotspot (or vice versa)
+     - Try from a different location
+     - Corporate networks often block uploads
+  
+  6. **Reduce project size** (if retries fail):
+     - Check `.easignore` file exists and excludes unnecessary files
+     - Remove `node_modules` if accidentally included
+     - Remove large media files from project
+     - Run: `eas build --platform android --profile preview --clear-cache`
+  
+  7. **Increase timeout** (advanced):
+     - Network uploads have timeouts
+     - Try building during off-peak hours
+     - Use EAS Build API directly if needed
+  
+  8. **Check EAS service status:**
+     - Visit: https://status.expo.dev/
+     - Check for known issues with EAS Build service
+  
+  **Most likely solution:** Simply retry the build command - network issues are usually temporary!
+
 ### 7.6: Optimizing Builds
 
 **Faster builds:**

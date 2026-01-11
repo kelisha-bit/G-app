@@ -140,6 +140,20 @@ export default function ProfileScreen({ navigation }) {
       color: '#6366f1',
       screen: 'MyActivity',
     },
+    {
+      id: 11,
+      title: 'Resources',
+      icon: 'library-outline',
+      color: '#f59e0b',
+      screen: 'Resources',
+    },
+    {
+      id: 12,
+      title: 'Discipleship & Training',
+      icon: 'school-outline',
+      color: '#8b5cf6',
+      screen: 'DiscipleshipTraining',
+    },
   ];
 
   const settingsItems = [
