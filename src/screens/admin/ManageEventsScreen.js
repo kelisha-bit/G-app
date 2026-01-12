@@ -46,6 +46,8 @@ export default function ManageEventsScreen({ navigation }) {
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringDayOfWeek, setRecurringDayOfWeek] = useState(null);
   const [recurringEndDate, setRecurringEndDate] = useState('');
+  const [isMultiDay, setIsMultiDay] = useState(false);
+  const [endDate, setEndDate] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
 
@@ -96,6 +98,8 @@ export default function ManageEventsScreen({ navigation }) {
     setIsRecurring(event.isRecurring || false);
     setRecurringDayOfWeek(event.recurrencePattern?.dayOfWeek ?? null);
     setRecurringEndDate(event.recurrencePattern?.endDate || '');
+    setIsMultiDay(event.isMultiDay || false);
+    setEndDate(event.endDate || '');
     setModalVisible(true);
   };
 
@@ -111,6 +115,8 @@ export default function ManageEventsScreen({ navigation }) {
     setIsRecurring(false);
     setRecurringDayOfWeek(null);
     setRecurringEndDate('');
+    setIsMultiDay(false);
+    setEndDate('');
     setSelectedEvent(null);
   };
 
@@ -190,6 +196,22 @@ export default function ManageEventsScreen({ navigation }) {
       return;
     }
 
+    // For multi-day events, endDate is required
+    if (isMultiDay && !endDate) {
+      Alert.alert('Validation Error', 'Please provide an end date for multi-day events');
+      return;
+    }
+
+    // Validate that endDate is after start date for multi-day events
+    if (isMultiDay && endDate && date) {
+      const start = new Date(date);
+      const end = new Date(endDate);
+      if (end <= start) {
+        Alert.alert('Validation Error', 'End date must be after the start date');
+        return;
+      }
+    }
+
     try {
       const eventData = {
         title: title.trim(),
@@ -199,12 +221,17 @@ export default function ManageEventsScreen({ navigation }) {
         description: description.trim(),
         image: imageUrl.trim() || 'https://via.placeholder.com/400x200',
         isRecurring: isRecurring,
+        isMultiDay: isMultiDay,
         updatedAt: new Date().toISOString(),
       };
 
       // Add date for non-recurring events
       if (!isRecurring) {
         eventData.date = date.trim();
+        // Add endDate for multi-day events
+        if (isMultiDay && endDate) {
+          eventData.endDate = endDate.trim();
+        }
       } else {
         // For recurring events, store the start date and recurrence pattern
         eventData.date = date.trim() || new Date().toISOString().split('T')[0]; // Use provided date or today as start
@@ -214,6 +241,8 @@ export default function ManageEventsScreen({ navigation }) {
           endDate: recurringEndDate.trim() || null,
           time: time.trim(),
         };
+        // Note: Multi-day recurring events are not supported in this version
+        // as recurring events are expanded into single-day instances
       }
 
       if (editMode && selectedEvent) {
@@ -320,10 +349,22 @@ export default function ManageEventsScreen({ navigation }) {
             </View>
           </>
         ) : (
-          <View style={styles.eventDetailRow}>
-            <Ionicons name="calendar" size={16} color="#6b7280" />
-            <Text style={styles.eventDetailText}>{event.date}</Text>
-          </View>
+          <>
+            <View style={styles.eventDetailRow}>
+              <Ionicons name="calendar" size={16} color="#6b7280" />
+              <Text style={styles.eventDetailText}>
+                {event.isMultiDay && event.endDate 
+                  ? `${event.date} - ${event.endDate}`
+                  : event.date}
+              </Text>
+            </View>
+            {event.isMultiDay && (
+              <View style={styles.eventDetailRow}>
+                <Ionicons name="calendar-outline" size={16} color="#6366f1" />
+                <Text style={styles.eventDetailText}>Multi-day event</Text>
+              </View>
+            )}
+          </>
         )}
         <View style={styles.eventDetailRow}>
           <Ionicons name="time" size={16} color="#6b7280" />
@@ -567,11 +608,57 @@ export default function ManageEventsScreen({ navigation }) {
               </Text>
             </View>
 
+            {/* Multi-Day Event Toggle */}
+            {!isRecurring && (
+              <View style={styles.formGroup}>
+                <TouchableOpacity
+                  style={styles.toggleContainer}
+                  onPress={() => setIsMultiDay(!isMultiDay)}
+                >
+                  <View style={styles.toggleRow}>
+                    <Ionicons 
+                      name={isMultiDay ? "calendar" : "calendar-outline"} 
+                      size={20} 
+                      color={isMultiDay ? "#6366f1" : "#6b7280"} 
+                    />
+                    <Text style={styles.toggleLabel}>Multi-Day Event</Text>
+                    <View style={[styles.toggleSwitch, isMultiDay && styles.toggleSwitchActive]}>
+                      <View style={[styles.toggleThumb, isMultiDay && styles.toggleThumbActive]} />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Multi-Day Event End Date */}
+            {isMultiDay && !isRecurring && (
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>End Date *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={endDate}
+                  onChangeText={setEndDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#9ca3af"
+                />
+                <Text style={styles.helperText}>
+                  The last day of the event
+                </Text>
+              </View>
+            )}
+
             {/* Recurring Event Toggle */}
             <View style={styles.formGroup}>
               <TouchableOpacity
                 style={styles.toggleContainer}
-                onPress={() => setIsRecurring(!isRecurring)}
+                onPress={() => {
+                  setIsRecurring(!isRecurring);
+                  // Disable multi-day when enabling recurring (they're mutually exclusive)
+                  if (!isRecurring) {
+                    setIsMultiDay(false);
+                    setEndDate('');
+                  }
+                }}
               >
                 <View style={styles.toggleRow}>
                   <Ionicons 

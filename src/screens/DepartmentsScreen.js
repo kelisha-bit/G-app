@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase.config';
 
 export default function DepartmentsScreen({ navigation }) {
@@ -20,6 +20,45 @@ export default function DepartmentsScreen({ navigation }) {
   useEffect(() => {
     loadDepartments();
   }, []);
+
+  const fetchMemberNames = async (memberIds) => {
+    if (!memberIds || memberIds.length === 0) return [];
+    
+    // Filter out invalid user IDs (must be non-empty strings)
+    const validMemberIds = memberIds.filter(
+      (userId) => userId && typeof userId === 'string' && userId.trim().length > 0
+    );
+    
+    if (validMemberIds.length === 0) return [];
+    
+    try {
+      const memberPromises = validMemberIds.map(async (userId) => {
+        try {
+          // Additional validation: ensure userId doesn't contain invalid characters
+          if (userId.includes('/') || userId.includes('\\')) {
+            console.warn(`Invalid user ID format: ${userId}`);
+            return null;
+          }
+          
+          const userDoc = await getDoc(doc(db, 'users', userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            return userData.displayName || userData.fullName || 'Unknown Member';
+          }
+          return null;
+        } catch (error) {
+          console.error(`Error fetching user ${userId}:`, error);
+          return null;
+        }
+      });
+      
+      const memberNames = await Promise.all(memberPromises);
+      return memberNames.filter(name => name !== null);
+    } catch (error) {
+      console.error('Error fetching member names:', error);
+      return [];
+    }
+  };
 
   const loadDepartments = async () => {
     try {
@@ -37,7 +76,19 @@ export default function DepartmentsScreen({ navigation }) {
           id: doc.id,
           ...doc.data(),
         }));
-        setDepartments(depts);
+        
+        // Fetch member names for each department
+        const deptsWithMembers = await Promise.all(
+          depts.map(async (dept) => {
+            const memberNames = await fetchMemberNames(dept.members || []);
+            return {
+              ...dept,
+              memberNames,
+            };
+          })
+        );
+        
+        setDepartments(deptsWithMembers);
       } else {
         // Use fallback data if no departments in Firestore
         setDepartments(getFallbackDepartments());
@@ -176,9 +227,15 @@ export default function DepartmentsScreen({ navigation }) {
                 <View style={styles.membersBadge}>
                   <Ionicons name="people-outline" size={14} color="#6b7280" />
                   <Text style={styles.membersText}>
-                    {dept.memberCount || dept.members || 0} members
+                    {dept.memberCount || (dept.members ? dept.members.length : 0)} members
                   </Text>
                 </View>
+                {dept.memberNames && dept.memberNames.length > 0 && (
+                  <Text style={styles.memberNamesText} numberOfLines={1}>
+                    {dept.memberNames.slice(0, 3).join(', ')}
+                    {dept.memberNames.length > 3 && ` +${dept.memberNames.length - 3} more`}
+                  </Text>
+                )}
               </View>
               <Ionicons name="chevron-forward" size={24} color="#d1d5db" />
             </TouchableOpacity>
@@ -303,6 +360,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
     marginLeft: 4,
+  },
+  memberNamesText: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   emptyState: {
     alignItems: 'center',

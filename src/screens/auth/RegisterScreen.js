@@ -26,8 +26,8 @@ export default function RegisterScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
-    if (!fullName || !email || !phone || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!fullName || !email || !password || !confirmPassword) {
+      Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
@@ -50,7 +50,7 @@ export default function RegisterScreen({ navigation }) {
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         fullName,
         email,
-        phone,
+        phone: phone || '', // Store empty string if no phone provided
         role: 'member',
         createdAt: new Date().toISOString(),
       });
@@ -112,7 +112,7 @@ export default function RegisterScreen({ navigation }) {
                 <Ionicons name="call-outline" size={20} color="#6366f1" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Phone Number"
+                  placeholder="Phone Number (Optional)"
                   placeholderTextColor="#999"
                   value={phone}
                   onChangeText={setPhone}

@@ -121,8 +121,14 @@ export default function ChurchCalendarScreen({ navigation }) {
       endDate.setHours(23, 59, 59);
 
       filtered = filtered.filter((event) => {
-        const eventDate = new Date(event.date);
-        return eventDate >= startDate && eventDate <= endDate;
+        const eventStart = new Date(event.date);
+        // For multi-day events, check if the event overlaps with the month
+        if (event.isMultiDay && event.endDate) {
+          const eventEnd = new Date(event.endDate);
+          eventEnd.setHours(23, 59, 59, 999);
+          return (eventStart <= endDate && eventEnd >= startDate);
+        }
+        return eventStart >= startDate && eventStart <= endDate;
       });
     } else if (viewMode === 'week') {
       const weekStart = getWeekStart(currentDate);
@@ -131,8 +137,14 @@ export default function ChurchCalendarScreen({ navigation }) {
       weekEnd.setHours(23, 59, 59);
 
       filtered = filtered.filter((event) => {
-        const eventDate = new Date(event.date);
-        return eventDate >= weekStart && eventDate <= weekEnd;
+        const eventStart = new Date(event.date);
+        // For multi-day events, check if the event overlaps with the week
+        if (event.isMultiDay && event.endDate) {
+          const eventEnd = new Date(event.endDate);
+          eventEnd.setHours(23, 59, 59, 999);
+          return (eventStart <= weekEnd && eventEnd >= weekStart);
+        }
+        return eventStart >= weekStart && eventStart <= weekEnd;
       });
     } else if (viewMode === 'list') {
       // Show upcoming events (next 30 days)
@@ -141,8 +153,14 @@ export default function ChurchCalendarScreen({ navigation }) {
       endDate.setHours(23, 59, 59);
 
       filtered = filtered.filter((event) => {
-        const eventDate = new Date(event.date);
-        return eventDate >= today && eventDate <= endDate;
+        const eventStart = new Date(event.date);
+        // For multi-day events, check if the event overlaps with the next 30 days
+        if (event.isMultiDay && event.endDate) {
+          const eventEnd = new Date(event.endDate);
+          eventEnd.setHours(23, 59, 59, 999);
+          return (eventStart <= endDate && eventEnd >= today);
+        }
+        return eventStart >= today && eventStart <= endDate;
       });
     }
 
@@ -189,7 +207,16 @@ export default function ChurchCalendarScreen({ navigation }) {
   const getEventsForDate = (date) => {
     if (!date) return [];
     const dateStr = date.toISOString().split('T')[0];
-    return filteredEvents.filter((event) => event.date === dateStr);
+    return filteredEvents.filter((event) => {
+      // For multi-day events, show on all days they span
+      if (event.isMultiDay && event.endDate) {
+        const eventStart = new Date(event.date);
+        const eventEnd = new Date(event.endDate);
+        const checkDate = new Date(dateStr);
+        return checkDate >= eventStart && checkDate <= eventEnd;
+      }
+      return event.date === dateStr;
+    });
   };
 
   const getWeekDays = () => {
@@ -486,7 +513,16 @@ export default function ChurchCalendarScreen({ navigation }) {
 
   const renderSelectedDateEvents = () => {
     const dateStr = selectedDate.toISOString().split('T')[0];
-    const dayEvents = filteredEvents.filter((event) => event.date === dateStr);
+    const dayEvents = filteredEvents.filter((event) => {
+      // For multi-day events, show on all days they span
+      if (event.isMultiDay && event.endDate) {
+        const eventStart = new Date(event.date);
+        const eventEnd = new Date(event.endDate);
+        const checkDate = new Date(dateStr);
+        return checkDate >= eventStart && checkDate <= eventEnd;
+      }
+      return event.date === dateStr;
+    });
 
     if (dayEvents.length === 0) {
       return (

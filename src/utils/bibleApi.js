@@ -25,11 +25,17 @@ const formatVerseReference = (reference) => {
 };
 
 /**
- * Fetches a Bible verse from the API
+ * Helper function to delay execution
+ */
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Fetches a Bible verse from the API with retry logic for rate limiting
  * @param {string} reference - Bible verse reference (e.g., "John 3:16", "Psalm 23:1")
+ * @param {number} retries - Number of retry attempts (default: 2)
  * @returns {Promise<{text: string, reference: string, error: string|null}>}
  */
-export const fetchBibleVerse = async (reference) => {
+export const fetchBibleVerse = async (reference, retries = 2) => {
   try {
     if (!reference || !reference.trim()) {
       return {
@@ -42,28 +48,56 @@ export const fetchBibleVerse = async (reference) => {
     const formattedRef = formatVerseReference(reference);
     const url = `https://bible-api.com/${formattedRef}`;
 
-    const response = await fetch(url);
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(url);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+        if (response.status === 429) {
+          // Rate limited - wait and retry
+          if (attempt < retries) {
+            const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff: 1s, 2s, 4s
+            console.log(`Rate limited. Waiting ${waitTime}ms before retry ${attempt + 1}/${retries}`);
+            await delay(waitTime);
+            continue;
+          } else {
+            return {
+              text: '',
+              reference: reference,
+              error: 'Too many requests. Please wait a moment and try again.',
+            };
+          }
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+          return {
+            text: '',
+            reference: reference,
+            error: data.error || 'Verse not found',
+          };
+        }
+
+        // The API returns text as a string, reference, and verses array
+        return {
+          text: data.text || '',
+          reference: data.reference || reference,
+          verses: data.verses || null, // Include verses array for chapter views
+          error: null,
+        };
+      } catch (fetchError) {
+        if (fetchError.message.includes('429') && attempt < retries) {
+          const waitTime = Math.pow(2, attempt) * 1000;
+          await delay(waitTime);
+          continue;
+        }
+        throw fetchError;
+      }
     }
-
-    const data = await response.json();
-
-    if (data.error) {
-      return {
-        text: '',
-        reference: reference,
-        error: data.error || 'Verse not found',
-      };
-    }
-
-    // The API returns text as a string, reference, and verses array
-    return {
-      text: data.text || '',
-      reference: data.reference || reference,
-      error: null,
-    };
   } catch (error) {
     console.error('Error fetching Bible verse:', error);
     return {
@@ -81,6 +115,62 @@ export const fetchBibleVerse = async (reference) => {
  */
 export const fetchBibleVerseRange = async (reference) => {
   return fetchBibleVerse(reference); // Same function handles ranges
+};
+
+/**
+ * Fetches an entire chapter
+ * @param {string} bookName - Book name (e.g., "John")
+ * @param {number} chapter - Chapter number (e.g., 3)
+ * @returns {Promise<{text: string, reference: string, verses: array, error: string|null}>}
+ */
+export const fetchBibleChapter = async (bookName, chapter) => {
+  try {
+    const formattedBook = formatVerseReference(bookName);
+    const url = `https://bible-api.com/${formattedBook}+${chapter}`;
+    
+    const response = await fetch(url);
+    
+    if (response.status === 429) {
+      return {
+        text: '',
+        reference: `${bookName} ${chapter}`,
+        verses: null,
+        error: 'Too many requests. Please wait a moment and try again.',
+      };
+    }
+    
+    if (!response.ok) {
+      // If that fails, try a range (e.g., "John 3:1-50")
+      const rangeRef = `${bookName} ${chapter}:1-50`;
+      return await fetchBibleVerse(rangeRef);
+    }
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      return {
+        text: '',
+        reference: `${bookName} ${chapter}`,
+        verses: null,
+        error: data.error || 'Chapter not found',
+      };
+    }
+    
+    return {
+      text: data.text || '',
+      reference: data.reference || `${bookName} ${chapter}`,
+      verses: data.verses || null, // Include verses array with verse numbers
+      error: null,
+    };
+  } catch (error) {
+    console.error('Error fetching Bible chapter:', error);
+    return {
+      text: '',
+      reference: `${bookName} ${chapter}`,
+      verses: null,
+      error: error.message || 'Failed to fetch chapter. Please check your internet connection.',
+    };
+  }
 };
 
 /**

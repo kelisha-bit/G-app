@@ -12,7 +12,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../../firebase.config';
-import { doc, getDoc, updateDoc, increment, collection, addDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, increment, collection, addDoc, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { formatRecurrencePattern, getDayName } from '../utils/recurringEvents';
 import { fetchWeatherForecast, getWeatherIconUrl, extractCityFromLocation } from '../utils/weatherApi';
 import notificationService from '../utils/notificationService';
@@ -27,11 +27,19 @@ export default function EventDetailsScreen({ route, navigation }) {
   const [isRegistered, setIsRegistered] = useState(false);
   const [weather, setWeather] = useState(null);
   const [loadingWeather, setLoadingWeather] = useState(false);
+  const [registrations, setRegistrations] = useState([]);
+  const [loadingRegistrations, setLoadingRegistrations] = useState(false);
 
   useEffect(() => {
     loadEventDetails();
-    checkRegistrationStatus();
   }, []);
+
+  useEffect(() => {
+    if (event) {
+      checkRegistrationStatus();
+      loadRegistrations();
+    }
+  }, [event]);
 
   useEffect(() => {
     if (event && event.date) {
@@ -111,9 +119,65 @@ export default function EventDetailsScreen({ route, navigation }) {
   };
 
   const checkRegistrationStatus = async () => {
-    // In a real app, check if user is already registered
-    // For now, we'll just check local state
-    setIsRegistered(false);
+    if (!auth.currentUser || !event) return;
+    
+    try {
+      const registrationsQuery = query(
+        collection(db, 'eventRegistrations'),
+        where('eventId', '==', event.id),
+        where('userId', '==', auth.currentUser.uid)
+      );
+      const snapshot = await getDocs(registrationsQuery);
+      setIsRegistered(!snapshot.empty);
+    } catch (error) {
+      console.error('Error checking registration status:', error);
+      setIsRegistered(false);
+    }
+  };
+
+  const loadRegistrations = async () => {
+    if (!event) return;
+    
+    try {
+      setLoadingRegistrations(true);
+      const registrationsQuery = query(
+        collection(db, 'eventRegistrations'),
+        where('eventId', '==', event.id),
+        orderBy('registeredAt', 'desc')
+      );
+      const snapshot = await getDocs(registrationsQuery);
+      const registrationsData = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setRegistrations(registrationsData);
+    } catch (error) {
+      console.error('Error loading registrations:', error);
+      // If orderBy fails due to missing index, try without it
+      try {
+        const registrationsQuery = query(
+          collection(db, 'eventRegistrations'),
+          where('eventId', '==', event.id)
+        );
+        const snapshot = await getDocs(registrationsQuery);
+        const registrationsData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        // Sort in memory
+        registrationsData.sort((a, b) => {
+          const dateA = a.registeredAt?.toDate?.() || new Date(a.registeredAt || 0);
+          const dateB = b.registeredAt?.toDate?.() || new Date(b.registeredAt || 0);
+          return dateB - dateA;
+        });
+        setRegistrations(registrationsData);
+      } catch (fallbackError) {
+        console.error('Error loading registrations (fallback):', fallbackError);
+        setRegistrations([]);
+      }
+    } finally {
+      setLoadingRegistrations(false);
+    }
   };
 
   const handleRegister = async () => {
@@ -150,7 +214,9 @@ export default function EventDetailsScreen({ route, navigation }) {
 
               setIsRegistered(true);
               Alert.alert('Success', 'You have been registered for this event!');
-              loadEventDetails(); // Reload to get updated count
+              await loadEventDetails(); // Reload to get updated count
+              await loadRegistrations(); // Reload registrations list
+              await checkRegistrationStatus(); // Update registration status
             } catch (error) {
               console.error('Error registering:', error);
               Alert.alert('Error', 'Failed to register. Please try again.');
@@ -183,6 +249,50 @@ export default function EventDetailsScreen({ route, navigation }) {
       month: 'long',
       day: 'numeric'
     });
+  };
+
+  const formatDateRange = (event) => {
+    if (event.isMultiDay && event.endDate) {
+      const startDate = formatDate(event.date);
+      const endDate = formatDate(event.endDate);
+      return `${startDate} - ${endDate}`;
+    }
+    return formatDate(event.date);
+  };
+
+  const formatRegistrationDate = (dateValue) => {
+    let date;
+    if (dateValue?.toDate) {
+      // Firestore Timestamp
+      date = dateValue.toDate();
+    } else if (dateValue) {
+      // ISO string or Date object
+      date = new Date(dateValue);
+    } else {
+      return 'recently';
+    }
+
+    const now = new Date();
+    const diffTime = Math.abs(now - date);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+    const diffMinutes = Math.floor(diffTime / (1000 * 60));
+
+    if (diffMinutes < 1) {
+      return 'just now';
+    } else if (diffMinutes < 60) {
+      return `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''} ago`;
+    } else if (diffHours < 24) {
+      return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+    } else if (diffDays < 7) {
+      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+    } else {
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+      });
+    }
   };
 
   const loadWeather = async () => {
@@ -270,7 +380,9 @@ export default function EventDetailsScreen({ route, navigation }) {
           <View style={styles.infoCard}>
             <Ionicons name="calendar" size={24} color="#6366f1" />
             <Text style={styles.infoCardLabel}>Date</Text>
-            <Text style={styles.infoCardValue}>{formatDate(event.date)}</Text>
+            <Text style={styles.infoCardValue} numberOfLines={2}>
+              {formatDateRange(event)}
+            </Text>
           </View>
 
           <View style={styles.infoCard}>
@@ -331,11 +443,21 @@ export default function EventDetailsScreen({ route, navigation }) {
             </View>
           )}
 
+          {event.isMultiDay && (
+            <View style={styles.detailRow}>
+              <Ionicons name="calendar" size={20} color="#6366f1" />
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>Event Duration</Text>
+                <Text style={styles.detailValue}>Multi-day event</Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.detailRow}>
             <Ionicons name="calendar-outline" size={20} color="#6b7280" />
             <View style={styles.detailContent}>
               <Text style={styles.detailLabel}>Date</Text>
-              <Text style={styles.detailValue}>{formatDate(event.date)}</Text>
+              <Text style={styles.detailValue}>{formatDateRange(event)}</Text>
             </View>
           </View>
           <View style={styles.detailRow}>
@@ -435,6 +557,53 @@ export default function EventDetailsScreen({ route, navigation }) {
               <Text style={styles.statLabel}>Status</Text>
             </View>
           </View>
+        </View>
+
+        {/* Registered Users List */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Registered Attendees</Text>
+          {loadingRegistrations ? (
+            <View style={styles.registrationsLoadingContainer}>
+              <ActivityIndicator size="small" color="#6366f1" />
+              <Text style={styles.registrationsLoadingText}>Loading attendees...</Text>
+            </View>
+          ) : registrations.length === 0 ? (
+            <View style={styles.emptyRegistrationsContainer}>
+              <Ionicons name="people-outline" size={48} color="#d1d5db" />
+              <Text style={styles.emptyRegistrationsText}>No registrations yet</Text>
+              <Text style={styles.emptyRegistrationsSubtext}>Be the first to register for this event!</Text>
+            </View>
+          ) : (
+            <View style={styles.registrationsList}>
+              {registrations.map((registration, index) => (
+                <View key={registration.id || index} style={styles.registrationItem}>
+                  <View style={styles.registrationAvatar}>
+                    <Text style={styles.registrationAvatarText}>
+                      {registration.userName?.charAt(0)?.toUpperCase() || 'U'}
+                    </Text>
+                  </View>
+                  <View style={styles.registrationInfo}>
+                    <Text style={styles.registrationName}>
+                      {registration.userName || 'Anonymous User'}
+                    </Text>
+                    <Text style={styles.registrationEmail}>
+                      {registration.userEmail || 'No email'}
+                    </Text>
+                    {registration.registeredAt && (
+                      <Text style={styles.registrationDate}>
+                        Registered {formatRegistrationDate(registration.registeredAt)}
+                      </Text>
+                    )}
+                  </View>
+                  {auth.currentUser && registration.userId === auth.currentUser.uid && (
+                    <View style={styles.youBadge}>
+                      <Text style={styles.youBadgeText}>You</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
       </ScrollView>
@@ -742,6 +911,90 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     color: '#9ca3af',
+  },
+  registrationsLoadingContainer: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+  },
+  registrationsLoadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  emptyRegistrationsContainer: {
+    backgroundColor: '#fff',
+    padding: 40,
+    borderRadius: 15,
+    alignItems: 'center',
+  },
+  emptyRegistrationsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#9ca3af',
+    marginTop: 15,
+  },
+  emptyRegistrationsSubtext: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  registrationsList: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    overflow: 'hidden',
+  },
+  registrationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  registrationAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#6366f1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  registrationAvatarText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  registrationInfo: {
+    flex: 1,
+  },
+  registrationName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  registrationEmail: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  registrationDate: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  youBadge: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  youBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 

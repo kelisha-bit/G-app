@@ -20,6 +20,8 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [isMember, setIsMember] = useState(false);
+  const [memberNames, setMemberNames] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const currentUser = auth.currentUser;
 
   useEffect(() => {
@@ -160,6 +162,53 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
     return fallbackDepartments[id] || null;
   };
 
+  const fetchMemberNames = async (memberIds) => {
+    if (!memberIds || memberIds.length === 0) return [];
+    
+    // Filter out invalid user IDs (must be non-empty strings)
+    const validMemberIds = memberIds.filter(
+      (userId) => userId && typeof userId === 'string' && userId.trim().length > 0
+    );
+    
+    if (validMemberIds.length === 0) return [];
+    
+    try {
+      setLoadingMembers(true);
+      const memberPromises = validMemberIds.map(async (userId) => {
+        try {
+          // Additional validation: ensure userId doesn't contain invalid characters
+          if (userId.includes('/') || userId.includes('\\')) {
+            console.warn(`Invalid user ID format: ${userId}`);
+            return null;
+          }
+          
+          const userDoc = await getDoc(doc(db, 'users', userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            return {
+              id: userId,
+              name: userData.displayName || userData.fullName || 'Unknown Member',
+              email: userData.email || '',
+              profilePicture: userData.profilePicture || userData.photoURL || null,
+            };
+          }
+          return null;
+        } catch (error) {
+          console.error(`Error fetching user ${userId}:`, error);
+          return null;
+        }
+      });
+      
+      const members = await Promise.all(memberPromises);
+      return members.filter(member => member !== null).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      console.error('Error fetching member names:', error);
+      return [];
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
   const loadDepartmentDetails = async () => {
     try {
       setLoading(true);
@@ -174,11 +223,20 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
         if (deptData.members && currentUser) {
           setIsMember(deptData.members.includes(currentUser.uid));
         }
+        
+        // Fetch member names
+        if (deptData.members && deptData.members.length > 0) {
+          const names = await fetchMemberNames(deptData.members);
+          setMemberNames(names);
+        } else {
+          setMemberNames([]);
+        }
       } else {
         // Use fallback data if not in Firebase yet
         const fallbackDept = getFallbackDepartment(departmentId);
         if (fallbackDept) {
           setDepartment(fallbackDept);
+          setMemberNames([]);
           Alert.alert(
             'Viewing Sample Data',
             'This department is not yet in the database. You can view details but cannot join until it\'s added to Firebase.',
@@ -195,6 +253,7 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
       const fallbackDept = getFallbackDepartment(departmentId);
       if (fallbackDept) {
         setDepartment(fallbackDept);
+        setMemberNames([]);
       } else {
         Alert.alert('Error', 'Failed to load department details');
       }
@@ -250,7 +309,7 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
         Alert.alert('Success', `Welcome to ${department.name}!`);
       }
 
-      // Reload details
+      // Reload details (this will also refresh member names)
       await loadDepartmentDetails();
     } catch (error) {
       console.error('Error joining/leaving department:', error);
@@ -448,6 +507,50 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
             </View>
           </View>
         )}
+
+        {/* Members Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Members</Text>
+          <View style={styles.card}>
+            {loadingMembers ? (
+              <ActivityIndicator size="small" color="#6366f1" />
+            ) : memberNames.length > 0 ? (
+              <>
+                <Text style={styles.membersCountText}>
+                  {memberNames.length} {memberNames.length === 1 ? 'member' : 'members'}
+                </Text>
+                <View style={styles.membersList}>
+                  {memberNames.map((member, index) => (
+                    <View key={member.id || index} style={styles.memberItem}>
+                      <View style={styles.memberAvatar}>
+                        {member.profilePicture ? (
+                          <Image
+                            source={{ uri: member.profilePicture }}
+                            style={styles.memberAvatarImage}
+                          />
+                        ) : (
+                          <View style={styles.memberAvatarPlaceholder}>
+                            <Text style={styles.memberAvatarText}>
+                              {member.name.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.memberInfo}>
+                        <Text style={styles.memberName}>{member.name}</Text>
+                        {member.email && (
+                          <Text style={styles.memberEmail}>{member.email}</Text>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <Text style={styles.noMembersText}>No members yet. Be the first to join!</Text>
+            )}
+          </View>
+        </View>
 
         {/* Contact Section */}
         <View style={styles.section}>
@@ -701,6 +804,63 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#6366f1',
+  },
+  membersCountText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginBottom: 15,
+  },
+  membersList: {
+    gap: 12,
+  },
+  memberItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  memberAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 12,
+    overflow: 'hidden',
+  },
+  memberAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  memberAvatarPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#ede9fe',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  memberAvatarText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#6366f1',
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 2,
+  },
+  memberEmail: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
+  noMembersText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 20,
   },
 });
 

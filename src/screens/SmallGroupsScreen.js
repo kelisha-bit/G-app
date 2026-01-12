@@ -11,6 +11,7 @@ import {
   Alert,
   Modal,
   TextInput,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -412,9 +413,27 @@ export default function SmallGroupsScreen({ navigation }) {
                   <Text style={styles.modalSectionTitle}>Contact</Text>
                   <TouchableOpacity
                     style={styles.contactButton}
-                    onPress={() => {
-                      // TODO: Implement phone call
-                      Alert.alert('Contact', `Call ${selectedGroup.leader}: ${selectedGroup.contact}`);
+                    onPress={async () => {
+                      try {
+                        const phoneNumber = selectedGroup.contact.replace(/[^\d+]/g, '');
+                        const phoneUrl = `tel:${phoneNumber}`;
+                        
+                        const canOpen = await Linking.canOpenURL(phoneUrl);
+                        if (canOpen) {
+                          await Linking.openURL(phoneUrl);
+                        } else {
+                          Alert.alert(
+                            'Cannot Make Call',
+                            'Your device cannot make phone calls. Please use: ' + selectedGroup.contact
+                          );
+                        }
+                      } catch (error) {
+                        console.error('Error making phone call:', error);
+                        Alert.alert(
+                          'Error',
+                          `Unable to make call. Please contact ${selectedGroup.leader} at ${selectedGroup.contact}`
+                        );
+                      }
                     }}
                   >
                     <Ionicons name="call" size={20} color="#14b8a6" />

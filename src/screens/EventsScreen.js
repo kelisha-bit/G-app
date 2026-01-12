@@ -118,9 +118,29 @@ export default function EventsScreen({ navigation }) {
     today.setHours(0, 0, 0, 0);
 
     if (viewMode === 'upcoming') {
-      filtered = filtered.filter(event => new Date(event.date) >= today);
+      filtered = filtered.filter(event => {
+        const eventStart = new Date(event.date);
+        eventStart.setHours(0, 0, 0, 0);
+        // For multi-day events, check if the event is still ongoing or hasn't started
+        if (event.isMultiDay && event.endDate) {
+          const eventEnd = new Date(event.endDate);
+          eventEnd.setHours(23, 59, 59, 999);
+          return eventEnd >= today;
+        }
+        return eventStart >= today;
+      });
     } else if (viewMode === 'past') {
-      filtered = filtered.filter(event => new Date(event.date) < today);
+      filtered = filtered.filter(event => {
+        // For multi-day events, check if the event has completely ended
+        if (event.isMultiDay && event.endDate) {
+          const eventEnd = new Date(event.endDate);
+          eventEnd.setHours(23, 59, 59, 999);
+          return eventEnd < today;
+        }
+        const eventStart = new Date(event.date);
+        eventStart.setHours(0, 0, 0, 0);
+        return eventStart < today;
+      });
     }
 
     // Filter by category
@@ -162,10 +182,28 @@ export default function EventsScreen({ navigation }) {
     });
   };
 
-  const isUpcoming = (dateString) => {
-    const eventDate = new Date(dateString);
+  const formatDateRange = (event) => {
+    if (event.isMultiDay && event.endDate) {
+      const startDate = formatDate(event.date);
+      const endDate = formatDate(event.endDate);
+      return `${startDate} - ${endDate}`;
+    }
+    return formatDate(event.date);
+  };
+
+  const isUpcoming = (event) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    
+    // For multi-day events, check if the event is still ongoing or hasn't started
+    if (event.isMultiDay && event.endDate) {
+      const eventEnd = new Date(event.endDate);
+      eventEnd.setHours(23, 59, 59, 999);
+      return eventEnd >= today;
+    }
+    
+    const eventDate = new Date(event.date);
+    eventDate.setHours(0, 0, 0, 0);
     return eventDate >= today;
   };
 
@@ -188,7 +226,7 @@ export default function EventsScreen({ navigation }) {
           <Text style={styles.badgeText}>Recurring</Text>
         </View>
       )}
-      {!event.isRecurringInstance && isUpcoming(event.date) ? (
+      {!event.isRecurringInstance && isUpcoming(event) ? (
         <View style={styles.upcomingBadge}>
           <Ionicons name="time" size={12} color="#fff" />
           <Text style={styles.badgeText}>Upcoming</Text>
@@ -216,13 +254,19 @@ export default function EventsScreen({ navigation }) {
         <View style={styles.eventDetails}>
           <View style={styles.eventDetailItem}>
             <Ionicons name="calendar" size={16} color="#6366f1" />
-            <Text style={styles.eventDetailText}>{formatDate(event.date)}</Text>
+            <Text style={styles.eventDetailText}>{formatDateRange(event)}</Text>
           </View>
           <View style={styles.eventDetailItem}>
             <Ionicons name="time" size={16} color="#6366f1" />
             <Text style={styles.eventDetailText}>{event.time}</Text>
           </View>
         </View>
+        {event.isMultiDay && (
+          <View style={styles.eventDetailItem}>
+            <Ionicons name="calendar-outline" size={14} color="#6366f1" />
+            <Text style={[styles.eventDetailText, { fontSize: 12, color: '#6366f1' }]}>Multi-day event</Text>
+          </View>
+        )}
 
         <View style={styles.eventFooter}>
           <View style={styles.eventDetailItem}>

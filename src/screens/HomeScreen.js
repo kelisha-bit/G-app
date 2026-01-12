@@ -314,7 +314,18 @@ export default function HomeScreen({ navigation }) {
       // Filter for upcoming events (from today onwards)
       const upcomingEvents = expandedEvents.filter(event => {
         const eventDate = event.date;
-        return eventDate && eventDate >= todayString;
+        if (!eventDate) return false;
+        
+        // For multi-day events, check if the event is still ongoing or hasn't started
+        if (event.isMultiDay && event.endDate) {
+          const eventEnd = new Date(event.endDate);
+          eventEnd.setHours(23, 59, 59, 999);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          return eventEnd >= today;
+        }
+        
+        return eventDate >= todayString;
       });
 
       // Sort by date and time to ensure proper ordering
@@ -337,7 +348,20 @@ export default function HomeScreen({ navigation }) {
           const todayString = today.toISOString().split('T')[0];
           const expandedEvents = expandRecurringEvents(cachedEvents, 12);
           const upcomingEvents = expandedEvents
-            .filter(event => event.date && event.date >= todayString)
+            .filter(event => {
+              if (!event.date) return false;
+              
+              // For multi-day events, check if the event is still ongoing or hasn't started
+              if (event.isMultiDay && event.endDate) {
+                const eventEnd = new Date(event.endDate);
+                eventEnd.setHours(23, 59, 59, 999);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                return eventEnd >= today;
+              }
+              
+              return event.date >= todayString;
+            })
             .sort((a, b) => {
               const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
               const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
@@ -356,7 +380,8 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const formatEventDate = (dateString, timeString) => {
+  const formatEventDate = (event, timeString) => {
+    const dateString = event.date || (typeof event === 'string' ? event : null);
     if (!dateString) return 'Date TBA';
     
     try {
@@ -367,6 +392,14 @@ export default function HomeScreen({ navigation }) {
       
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      // Handle multi-day events
+      if (event.isMultiDay && event.endDate) {
+        const endDate = new Date(event.endDate);
+        const startFormatted = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const endFormatted = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: date.getFullYear() !== endDate.getFullYear() ? 'numeric' : undefined });
+        return timeString ? `${startFormatted} - ${endFormatted}, ${timeString}` : `${startFormatted} - ${endFormatted}`;
+      }
       
       // Check if it's today
       if (date.toDateString() === today.toDateString()) {
@@ -588,7 +621,7 @@ export default function HomeScreen({ navigation }) {
               <View style={styles.eventDetails}>
                 <Text style={styles.eventTitle}>{event.title || 'Untitled Event'}</Text>
                 <Text style={styles.eventDate}>
-                  {formatEventDate(event.date, event.time)}
+                  {formatEventDate(event, event.time)}
                 </Text>
                 {event.location && (
                   <View style={styles.eventLocationRow}>

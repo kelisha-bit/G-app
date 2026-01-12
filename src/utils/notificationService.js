@@ -161,6 +161,39 @@ class NotificationService {
    */
   async scheduleLocalNotification(title, body, data = {}, trigger = null) {
     try {
+      // Format trigger properly for Expo Notifications
+      // Expo requires trigger to have a 'type' property
+      let formattedTrigger = null;
+      
+      if (trigger) {
+        if (trigger instanceof Date) {
+          // Use date trigger type
+          formattedTrigger = {
+            type: 'date',
+            date: trigger,
+          };
+        } else if (typeof trigger === 'object' && trigger.seconds !== undefined) {
+          // Use timeInterval trigger type for seconds-based triggers
+          formattedTrigger = {
+            type: 'timeInterval',
+            seconds: trigger.seconds,
+          };
+        } else if (typeof trigger === 'object' && trigger.date) {
+          // Date trigger with date property
+          formattedTrigger = {
+            type: 'date',
+            date: trigger.date,
+          };
+        } else if (typeof trigger === 'object' && trigger.type) {
+          // Already has type, use as-is
+          formattedTrigger = trigger;
+        } else {
+          // Invalid trigger format, show immediately
+          formattedTrigger = null;
+        }
+      }
+      // If trigger is null, notification shows immediately
+
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title,
@@ -168,8 +201,9 @@ class NotificationService {
           data,
           sound: true,
           priority: Notifications.AndroidNotificationPriority.HIGH,
+          channelId: 'events', // Use events channel for event reminders
         },
-        trigger: trigger || null, // null means show immediately
+        trigger: formattedTrigger, // null means show immediately
       });
 
       return notificationId;
@@ -197,6 +231,9 @@ class NotificationService {
       // Schedule 24-hour reminder
       const reminder24h = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
       if (reminder24h > now) {
+        // Calculate seconds from now until reminder time
+        const secondsUntil24h = Math.floor((reminder24h.getTime() - now.getTime()) / 1000);
+        
         const id = await this.scheduleLocalNotification(
           `Event Reminder: ${event.title}`,
           `Don't forget about ${event.title} tomorrow!`,
@@ -205,7 +242,7 @@ class NotificationService {
             eventId: event.id,
             screen: 'EventDetails',
           },
-          reminder24h
+          { seconds: secondsUntil24h }
         );
         if (id) notificationIds.push(id);
       }
@@ -213,6 +250,9 @@ class NotificationService {
       // Schedule 1-hour reminder
       const reminder1h = new Date(eventDate.getTime() - 60 * 60 * 1000);
       if (reminder1h > now) {
+        // Calculate seconds from now until reminder time
+        const secondsUntil1h = Math.floor((reminder1h.getTime() - now.getTime()) / 1000);
+        
         const id = await this.scheduleLocalNotification(
           `Event Starting Soon: ${event.title}`,
           `${event.title} starts in 1 hour!`,
@@ -221,7 +261,7 @@ class NotificationService {
             eventId: event.id,
             screen: 'EventDetails',
           },
-          reminder1h
+          { seconds: secondsUntil1h }
         );
         if (id) notificationIds.push(id);
       }

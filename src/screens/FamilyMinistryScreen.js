@@ -26,6 +26,9 @@ import {
   orderBy,
   doc,
   getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 import { db, auth } from '../../firebase.config';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -91,7 +94,12 @@ export default function FamilyMinistryScreen({ navigation, route }) {
   const [specialNeeds, setSpecialNeeds] = useState('');
   const [checkingIn, setCheckingIn] = useState(false);
   const [myChildren, setMyChildren] = useState([]);
+  const [registeredChildren, setRegisteredChildren] = useState([]);
   const [resources, setResources] = useState([]);
+  const [registerModalVisible, setRegisterModalVisible] = useState(false);
+  const [editingChild, setEditingChild] = useState(null);
+  const [registering, setRegistering] = useState(false);
+  const [selectedRegisteredChild, setSelectedRegisteredChild] = useState(null);
 
   useEffect(() => {
     loadData();
@@ -103,6 +111,7 @@ export default function FamilyMinistryScreen({ navigation, route }) {
       await Promise.all([
         loadChildrenEvents(),
         loadMyChildren(),
+        loadRegisteredChildren(),
         loadResources(),
       ]);
     } catch (error) {
@@ -129,8 +138,12 @@ export default function FamilyMinistryScreen({ navigation, route }) {
       snapshot.forEach((doc) => {
         const event = doc.data();
         // Filter for children/family events and future dates
+        const isFutureEvent = event.isMultiDay && event.endDate
+          ? event.endDate >= today
+          : event.date >= today;
+        
         if (
-          event.date >= today &&
+          isFutureEvent &&
           (event.category === 'Youth' ||
             event.category === 'Other' ||
             event.title?.toLowerCase().includes('children') ||
@@ -225,6 +238,45 @@ export default function FamilyMinistryScreen({ navigation, route }) {
         console.log('Permission denied - collection may not exist yet or rules need deployment');
       }
       setMyChildren([]);
+    }
+  };
+
+  const loadRegisteredChildren = async () => {
+    try {
+      if (!auth.currentUser) {
+        setRegisteredChildren([]);
+        return;
+      }
+
+      const profilesQuery = query(
+        collection(db, 'childrenProfiles'),
+        where('parentId', '==', auth.currentUser.uid)
+      );
+      const snapshot = await getDocs(profilesQuery);
+      const profiles = [];
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.parentId === auth.currentUser.uid) {
+          profiles.push({
+            id: doc.id,
+            ...data,
+          });
+        }
+      });
+
+      // Sort by child name
+      profiles.sort((a, b) => (a.childName || '').localeCompare(b.childName || ''));
+
+      setRegisteredChildren(profiles);
+    } catch (error) {
+      console.error('Error loading registered children:', error);
+      // Handle permission errors gracefully - collection might be empty or rules still propagating
+      if (error.code === 'permission-denied' || error.code === 'permissions-denied' || error.message?.includes('permission')) {
+        console.log('Permission denied - this is normal if you haven\'t registered any children yet. Rules are deployed and will work once you register your first child.');
+        // Set empty array - this is fine, user just hasn't registered children yet
+      }
+      setRegisteredChildren([]);
     }
   };
 
@@ -342,20 +394,69 @@ export default function FamilyMinistryScreen({ navigation, route }) {
 
       await addDoc(collection(db, 'childrenCheckIns'), checkInData);
 
-      Alert.alert(
-        '✅ Check-In Successful!',
-        `${childName} has been checked in to ${ageGroup.name}.\n\nPickup Code: ${checkInData.pickupCode}\n\nPlease keep this code safe. You'll need it to pick up your child.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setCheckInModalVisible(false);
-              resetCheckInForm();
-              loadMyChildren();
-            },
-          },
-        ]
+      // Check if child profile exists, if not offer to save
+      const existingProfile = registeredChildren.find(
+        (c) => c.childName.toLowerCase() === childName.trim().toLowerCase()
       );
+
+      if (!existingProfile && !selectedRegisteredChild) {
+        Alert.alert(
+          '✅ Check-In Successful!',
+          `${childName} has been checked in to ${ageGroup.name}.\n\nPickup Code: ${checkInData.pickupCode}\n\nWould you like to save this child's information for faster check-ins next time?`,
+          [
+            {
+              text: 'Skip',
+              style: 'cancel',
+              onPress: () => {
+                setCheckInModalVisible(false);
+                resetCheckInForm();
+                loadMyChildren();
+              },
+            },
+            {
+              text: 'Save Profile',
+              onPress: async () => {
+                try {
+                  const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+                  const userData = userDoc.exists() ? userDoc.data() : {};
+                  await addDoc(collection(db, 'childrenProfiles'), {
+                    parentId: auth.currentUser.uid,
+                    parentName: parentName.trim() || userData.displayName || auth.currentUser.displayName || 'Parent',
+                    parentEmail: auth.currentUser.email,
+                    parentPhone: parentPhone.trim() || userData.phone || '',
+                    childName: childName.trim(),
+                    childAge: childAge.trim(),
+                    specialNeeds: specialNeeds.trim() || '',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  });
+                  loadRegisteredChildren();
+                } catch (error) {
+                  console.error('Error saving profile:', error);
+                }
+                setCheckInModalVisible(false);
+                resetCheckInForm();
+                loadMyChildren();
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          '✅ Check-In Successful!',
+          `${childName} has been checked in to ${ageGroup.name}.\n\nPickup Code: ${checkInData.pickupCode}\n\nPlease keep this code safe. You'll need it to pick up your child.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setCheckInModalVisible(false);
+                resetCheckInForm();
+                loadMyChildren();
+              },
+            },
+          ]
+        );
+      }
     } catch (error) {
       console.error('Check-in error:', error);
       Alert.alert('Error', 'Failed to check in. Please try again.');
@@ -371,6 +472,111 @@ export default function FamilyMinistryScreen({ navigation, route }) {
     setParentName('');
     setParentPhone('');
     setSpecialNeeds('');
+    setSelectedRegisteredChild(null);
+  };
+
+  const resetRegisterForm = () => {
+    setEditingChild(null);
+    setChildName('');
+    setChildAge('');
+    setParentName('');
+    setParentPhone('');
+    setSpecialNeeds('');
+    setSelectedAgeGroup(null);
+  };
+
+  const handleRegisterChild = async () => {
+    if (!childName.trim() || !childAge.trim()) {
+      Alert.alert('Validation Error', 'Please fill in child name and age');
+      return;
+    }
+
+    setRegistering(true);
+    try {
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const userData = userDoc.exists() ? userDoc.data() : {};
+
+      const profileData = {
+        parentId: auth.currentUser.uid,
+        parentName: parentName.trim() || userData.displayName || auth.currentUser.displayName || 'Parent',
+        parentEmail: auth.currentUser.email,
+        parentPhone: parentPhone.trim() || userData.phone || '',
+        childName: childName.trim(),
+        childAge: childAge.trim(),
+        specialNeeds: specialNeeds.trim() || '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (editingChild) {
+        // Update existing profile
+        await updateDoc(doc(db, 'childrenProfiles', editingChild.id), {
+          ...profileData,
+          updatedAt: new Date().toISOString(),
+        });
+        Alert.alert('Success', 'Child profile updated successfully!');
+      } else {
+        // Create new profile
+        await addDoc(collection(db, 'childrenProfiles'), profileData);
+        Alert.alert('Success', 'Child registered successfully! You can now quickly check them in.');
+      }
+
+      setRegisterModalVisible(false);
+      resetRegisterForm();
+      loadRegisteredChildren();
+    } catch (error) {
+      console.error('Registration error:', error);
+      Alert.alert('Error', 'Failed to register child. Please try again.');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const handleDeleteChild = (childId, childName) => {
+    Alert.alert(
+      'Delete Child Profile',
+      `Are you sure you want to delete ${childName}'s profile? This will not delete their check-in history.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteDoc(doc(db, 'childrenProfiles', childId));
+              Alert.alert('Success', 'Child profile deleted successfully');
+              loadRegisteredChildren();
+            } catch (error) {
+              console.error('Delete error:', error);
+              Alert.alert('Error', 'Failed to delete child profile. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSelectRegisteredChild = (child) => {
+    setSelectedRegisteredChild(child.id);
+    setChildName(child.childName);
+    setChildAge(child.childAge);
+    setParentName(child.parentName || '');
+    setParentPhone(child.parentPhone || '');
+    setSpecialNeeds(child.specialNeeds || '');
+  };
+
+  const openRegisterModal = (child = null) => {
+    if (child) {
+      setEditingChild(child);
+      setChildName(child.childName);
+      setChildAge(child.childAge);
+      setParentName(child.parentName || '');
+      setParentPhone(child.parentPhone || '');
+      setSpecialNeeds(child.specialNeeds || '');
+    } else {
+      resetRegisterForm();
+    }
+    setRegisterModalVisible(true);
   };
 
   const openResource = (resource) => {
@@ -430,7 +636,10 @@ export default function FamilyMinistryScreen({ navigation, route }) {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Upcoming Events</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Events')}>
+          <TouchableOpacity onPress={() => {
+            // Navigate back to MainTabs - user can then tap Events tab
+            navigation.navigate('MainTabs');
+          }}>
             <Text style={styles.seeAllText}>See All</Text>
           </TouchableOpacity>
         </View>
@@ -504,13 +713,96 @@ export default function FamilyMinistryScreen({ navigation, route }) {
         </Text>
       </View>
 
+      {registeredChildren.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Registered Children</Text>
+            <TouchableOpacity onPress={() => openRegisterModal()}>
+              <Ionicons name="add-circle" size={24} color="#6366f1" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.sectionDescription}>
+            Tap a child to quickly check them in, or register a new child profile.
+          </Text>
+          {registeredChildren.map((child) => (
+            <TouchableOpacity
+              key={child.id}
+              style={[
+                styles.registeredChildCard,
+                selectedRegisteredChild === child.id && styles.registeredChildCardSelected,
+              ]}
+              onPress={() => {
+                handleSelectRegisteredChild(child);
+                setCheckInModalVisible(true);
+              }}
+            >
+              <View style={styles.registeredChildContent}>
+                <View style={styles.registeredChildIcon}>
+                  <Ionicons name="person" size={24} color="#6366f1" />
+                </View>
+                <View style={styles.registeredChildInfo}>
+                  <Text style={styles.registeredChildName}>{child.childName}</Text>
+                  <Text style={styles.registeredChildDetails}>Age {child.childAge}</Text>
+                  {child.specialNeeds && (
+                    <Text style={styles.registeredChildSpecial} numberOfLines={1}>
+                      {child.specialNeeds}
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.registeredChildActions}>
+                  <TouchableOpacity
+                    style={styles.editButton}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      openRegisterModal(child);
+                    }}
+                  >
+                    <Ionicons name="create-outline" size={18} color="#6366f1" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleDeleteChild(child.id, child.childName);
+                    }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {registeredChildren.length === 0 && (
+        <View style={styles.section}>
+          <View style={styles.emptyState}>
+            <Ionicons name="people-outline" size={48} color="#d1d5db" />
+            <Text style={styles.emptyStateText}>No registered children yet</Text>
+            <Text style={styles.emptyStateSubtext}>
+              Register your children to make check-ins faster and easier!
+            </Text>
+            <TouchableOpacity
+              style={styles.registerButton}
+              onPress={() => openRegisterModal()}
+            >
+              <LinearGradient colors={['#10b981', '#059669']} style={styles.registerButtonGradient}>
+                <Ionicons name="person-add" size={20} color="#fff" />
+                <Text style={styles.registerButtonText}>Register Child</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {myChildren.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>My Children</Text>
-          {myChildren.map((child) => (
+          <Text style={styles.sectionTitle}>Recent Check-Ins</Text>
+          {myChildren.slice(0, 3).map((child) => (
             <View key={child.id} style={styles.myChildCard}>
               <View style={styles.myChildContent}>
-                <Ionicons name="person" size={24} color="#6366f1" />
+                <Ionicons name="checkmark-circle" size={24} color="#10b981" />
                 <View style={styles.myChildInfo}>
                   <Text style={styles.myChildName}>{child.childName}</Text>
                   <Text style={styles.myChildDetails}>
@@ -526,18 +818,22 @@ export default function FamilyMinistryScreen({ navigation, route }) {
         </View>
       )}
 
-      <TouchableOpacity
-        style={styles.checkInButton}
-        onPress={() => {
-          setSelectedAgeGroup(null);
-          setCheckInModalVisible(true);
-        }}
-      >
-        <LinearGradient colors={['#6366f1', '#8b5cf6']} style={styles.checkInButtonGradient}>
-          <Ionicons name="add-circle" size={24} color="#fff" />
-          <Text style={styles.checkInButtonText}>Check In New Child</Text>
-        </LinearGradient>
-      </TouchableOpacity>
+      <View style={styles.section}>
+        <TouchableOpacity
+          style={styles.checkInButton}
+          onPress={() => {
+            resetCheckInForm();
+            setCheckInModalVisible(true);
+          }}
+        >
+          <LinearGradient colors={['#6366f1', '#8b5cf6']} style={styles.checkInButtonGradient}>
+            <Ionicons name="add-circle" size={24} color="#fff" />
+            <Text style={styles.checkInButtonText}>
+              {registeredChildren.length > 0 ? 'Check In Child' : 'Check In New Child'}
+            </Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 
@@ -717,6 +1013,30 @@ export default function FamilyMinistryScreen({ navigation, route }) {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
+              {registeredChildren.length > 0 && !selectedRegisteredChild && (
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Select Registered Child (Optional)</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.registeredChildrenList}>
+                    {registeredChildren.map((child) => (
+                      <TouchableOpacity
+                        key={child.id}
+                        style={styles.registeredChildOption}
+                        onPress={() => handleSelectRegisteredChild(child)}
+                      >
+                        <Ionicons name="person" size={20} color="#6366f1" />
+                        <Text style={styles.registeredChildOptionText}>{child.childName}</Text>
+                        <Text style={styles.registeredChildOptionAge}>Age {child.childAge}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <View style={styles.divider}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>OR</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
+                </View>
+              )}
+
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Select Age Group *</Text>
                 <View style={styles.ageGroupSelector}>
@@ -829,6 +1149,129 @@ export default function FamilyMinistryScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
           </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Registration Modal */}
+      <Modal
+        visible={registerModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setRegisterModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {editingChild ? 'Edit Child Profile' : 'Register Child'}
+                </Text>
+                <TouchableOpacity onPress={() => {
+                  setRegisterModalVisible(false);
+                  resetRegisterForm();
+                }}>
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView 
+                style={styles.modalBody}
+                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) }}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Child's Name *</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={childName}
+                    onChangeText={setChildName}
+                    placeholder="Enter child's name"
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Child's Age *</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={childAge}
+                    onChangeText={setChildAge}
+                    placeholder="e.g., 5 years"
+                    keyboardType="default"
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Parent/Guardian Name</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={parentName}
+                    onChangeText={setParentName}
+                    placeholder="Your name"
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Phone Number</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={parentPhone}
+                    onChangeText={setParentPhone}
+                    placeholder="+233 XX XXX XXXX"
+                    keyboardType="phone-pad"
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Special Needs or Allergies</Text>
+                  <TextInput
+                    style={[styles.formInput, styles.formTextArea]}
+                    value={specialNeeds}
+                    onChangeText={setSpecialNeeds}
+                    placeholder="Any special needs, allergies, or important information"
+                    multiline
+                    numberOfLines={3}
+                  />
+                </View>
+
+                <View style={styles.infoBox}>
+                  <Ionicons name="information-circle" size={20} color="#6366f1" />
+                  <Text style={styles.infoText}>
+                    Registered children can be quickly selected during check-in, saving you time!
+                  </Text>
+                </View>
+              </ScrollView>
+
+              <View style={styles.modalFooter}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => {
+                    setRegisterModalVisible(false);
+                    resetRegisterForm();
+                  }}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalSubmitButton, registering && styles.modalSubmitButtonDisabled]}
+                  onPress={handleRegisterChild}
+                  disabled={registering}
+                >
+                  {registering ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalSubmitText}>
+                      {editingChild ? 'Update' : 'Register'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -1317,6 +1760,155 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  registeredChildCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  registeredChildCardSelected: {
+    borderColor: '#6366f1',
+    backgroundColor: '#f3f4f6',
+  },
+  registeredChildContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  registeredChildIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  registeredChildInfo: {
+    flex: 1,
+  },
+  registeredChildName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  registeredChildDetails: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 2,
+  },
+  registeredChildSpecial: {
+    fontSize: 12,
+    color: '#9ca3af',
+    fontStyle: 'italic',
+  },
+  registeredChildActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  editButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+  },
+  deleteButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+  },
+  registerButton: {
+    marginTop: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  registerButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+  },
+  registerButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginLeft: 8,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+  },
+  registeredChildrenList: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  registeredChildOption: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 12,
+    marginRight: 12,
+    alignItems: 'center',
+    minWidth: 100,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+  },
+  registeredChildOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    marginTop: 4,
+  },
+  registeredChildOptionAge: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e5e7eb',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 12,
+    color: '#9ca3af',
+    fontWeight: '600',
+  },
+  infoBox: {
+    flexDirection: 'row',
+    backgroundColor: '#eff6ff',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    alignItems: 'flex-start',
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1e40af',
+    marginLeft: 8,
+    lineHeight: 18,
   },
 });
 

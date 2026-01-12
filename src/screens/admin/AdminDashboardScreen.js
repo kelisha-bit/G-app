@@ -421,6 +421,31 @@ export default function AdminDashboardScreen({ navigation }) {
     }
   };
 
+  const handleActivityPress = (activity) => {
+    switch (activity.type) {
+      case 'member':
+        // Navigate to member management or member activity screen
+        navigation.navigate('ManageMembers');
+        break;
+      case 'giving':
+        // Navigate to reports or giving screen
+        navigation.navigate('Reports');
+        break;
+      case 'event':
+        // Navigate to events management
+        navigation.navigate('ManageEvents');
+        break;
+      case 'prayer':
+        // Navigate to reports (prayer requests might be in reports)
+        navigation.navigate('Reports');
+        break;
+      default:
+        // Default to reports for any other activity type
+        navigation.navigate('Reports');
+        break;
+    }
+  };
+
   return (
     <View style={styles.container}>
       <LinearGradient 
@@ -664,6 +689,7 @@ export default function AdminDashboardScreen({ navigation }) {
                     styles.activityItem,
                     index === recentActivities.length - 1 && styles.activityItemLast
                   ]}
+                  onPress={() => handleActivityPress(activity)}
                   activeOpacity={0.7}
                 >
                   <View style={[styles.activityIconContainer, { backgroundColor: `${getActivityColor(activity.type)}15` }]}>

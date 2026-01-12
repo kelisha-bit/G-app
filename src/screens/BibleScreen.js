@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { fetchBibleVerse, isValidVerseReference } from '../utils/bibleApi';
+import { fetchBibleVerse, isValidVerseReference, fetchBibleChapter } from '../utils/bibleApi';
 import { auth, db } from '../../firebase.config';
 import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
@@ -93,6 +93,96 @@ const READING_PLANS = [
   { id: 'gospels', name: 'The Gospels', description: 'Read through Matthew, Mark, Luke, and John in 30 days', days: 30 },
 ];
 
+// Helper function to calculate days since start date
+const calculateDaysSinceStart = (startDate) => {
+  const start = new Date(startDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  start.setHours(0, 0, 0, 0);
+  const diffTime = today - start;
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  return Math.max(0, diffDays + 1); // +1 because day 1 is the start date
+};
+
+// Generate reading assignments for each plan type
+const getReadingAssignment = (planId, day) => {
+  const assignments = {
+    '365': () => {
+      // Bible in a Year - distribute books across 365 days
+      const books = BIBLE_BOOKS;
+      const totalChapters = books.reduce((sum, book) => sum + book.chapters, 0);
+      const chaptersPerDay = totalChapters / 365;
+      let currentChapter = Math.floor((day - 1) * chaptersPerDay);
+      
+      for (const book of books) {
+        if (currentChapter < book.chapters) {
+          const chapter = Math.floor(currentChapter) + 1;
+          return `${book.name} ${chapter}`;
+        }
+        currentChapter -= book.chapters;
+      }
+      return 'Revelation 22'; // Fallback
+    },
+    'new-testament': () => {
+      // New Testament books (Matthew to Revelation)
+      const ntBooks = BIBLE_BOOKS.slice(39); // Starting from Matthew
+      const totalChapters = ntBooks.reduce((sum, book) => sum + book.chapters, 0);
+      const chaptersPerDay = totalChapters / 90;
+      let currentChapter = Math.floor((day - 1) * chaptersPerDay);
+      
+      for (const book of ntBooks) {
+        if (currentChapter < book.chapters) {
+          const chapter = Math.floor(currentChapter) + 1;
+          return `${book.name} ${chapter}`;
+        }
+        currentChapter -= book.chapters;
+      }
+      return 'Revelation 22';
+    },
+    'psalms': () => {
+      // Psalms and Proverbs - alternate or distribute
+      if (day <= 60) {
+        if (day <= 30) {
+          // First 30 days: Psalms
+          const psalmsPerDay = 150 / 30;
+          const psalm = Math.floor((day - 1) * psalmsPerDay) + 1;
+          return `Psalm ${psalm}`;
+        } else {
+          // Next 30 days: Proverbs
+          const proverbsPerDay = 31 / 30;
+          const proverb = Math.floor((day - 31) * proverbsPerDay) + 1;
+          return `Proverbs ${proverb}`;
+        }
+      }
+      return 'Proverbs 31';
+    },
+    'gospels': () => {
+      // The Gospels - Matthew, Mark, Luke, John
+      const gospels = [
+        { name: 'Matthew', chapters: 28 },
+        { name: 'Mark', chapters: 16 },
+        { name: 'Luke', chapters: 24 },
+        { name: 'John', chapters: 21 },
+      ];
+      const totalChapters = gospels.reduce((sum, book) => sum + book.chapters, 0);
+      const chaptersPerDay = totalChapters / 30;
+      let currentChapter = Math.floor((day - 1) * chaptersPerDay);
+      
+      for (const book of gospels) {
+        if (currentChapter < book.chapters) {
+          const chapter = Math.floor(currentChapter) + 1;
+          return `${book.name} ${chapter}`;
+        }
+        currentChapter -= book.chapters;
+      }
+      return 'John 21';
+    },
+  };
+  
+  const generator = assignments[planId];
+  return generator ? generator() : `Day ${day} Reading`;
+};
+
 export default function BibleScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('verse'); // verse, search, plans, bookmarks
   const [verseOfTheDay, setVerseOfTheDay] = useState(null);
@@ -105,11 +195,34 @@ export default function BibleScreen({ navigation }) {
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [selectedBook, setSelectedBook] = useState(null);
   const [selectedChapter, setSelectedChapter] = useState(1);
+  const [readingPlans, setReadingPlans] = useState({});
+  const [chapterModalVisible, setChapterModalVisible] = useState(false);
+  const [chapterVerses, setChapterVerses] = useState([]);
+  const [loadingChapter, setLoadingChapter] = useState(false);
+  const [chapterViewVisible, setChapterViewVisible] = useState(false);
+  const [todayReading, setTodayReading] = useState(null);
+  const [todayReadingLoading, setTodayReadingLoading] = useState(false);
 
   useEffect(() => {
     loadVerseOfTheDay();
     loadBookmarks();
+    loadReadingPlans();
   }, []);
+
+  // Auto-update reading plans when component mounts or when active tab changes
+  useEffect(() => {
+    if (activeTab === 'plans') {
+      autoUpdateReadingPlans();
+      loadTodayReading();
+    }
+  }, [activeTab]);
+
+  // Reload today's reading when reading plans change
+  useEffect(() => {
+    if (activeTab === 'plans' && Object.keys(readingPlans).length > 0) {
+      loadTodayReading();
+    }
+  }, [readingPlans]);
 
   const loadVerseOfTheDay = async () => {
     try {
@@ -131,11 +244,16 @@ export default function BibleScreen({ navigation }) {
       const verseRef = verses[dayOfYear % verses.length];
       
       const result = await fetchBibleVerse(verseRef);
-      if (!result.error) {
+      if (result && !result.error) {
         setVerseOfTheDay(result);
+      } else {
+        // If there's an error, set verseOfTheDay to null so error state shows
+        setVerseOfTheDay(null);
+        console.error('Failed to load verse:', result?.error || 'Unknown error');
       }
     } catch (error) {
       console.error('Error loading verse of the day:', error);
+      setVerseOfTheDay(null);
     } finally {
       setLoading(false);
     }
@@ -153,6 +271,402 @@ export default function BibleScreen({ navigation }) {
       }
     } catch (error) {
       console.error('Error loading bookmarks:', error);
+    }
+  };
+
+  const loadReadingPlans = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const plans = userData.readingPlans || {};
+        
+        // Normalize daysCompleted and auto-calculate current day
+        const normalizedPlans = {};
+        Object.keys(plans).forEach(planId => {
+          const plan = plans[planId];
+          const daysCompleted = Array.isArray(plan.daysCompleted) 
+            ? plan.daysCompleted 
+            : (plan.daysCompleted ? [plan.daysCompleted] : []);
+          
+          // Auto-calculate current day based on start date
+          let currentDay = plan.currentDay || 1;
+          if (plan.startDate) {
+            const calculatedDay = calculateDaysSinceStart(plan.startDate);
+            // Only auto-advance if calculated day is ahead of stored current day
+            if (calculatedDay > currentDay && calculatedDay <= plan.totalDays) {
+              currentDay = calculatedDay;
+            }
+          }
+          
+          normalizedPlans[planId] = {
+            ...plan,
+            daysCompleted,
+            currentDay, // Auto-updated current day
+          };
+        });
+        
+        setReadingPlans(normalizedPlans);
+      }
+    } catch (error) {
+      console.error('Error loading reading plans:', error);
+    }
+  };
+
+  // Auto-update reading plans with current day
+  const autoUpdateReadingPlans = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const updatedPlans = { ...readingPlans };
+      let needsUpdate = false;
+
+      Object.keys(updatedPlans).forEach(planId => {
+        const plan = updatedPlans[planId];
+        if (plan.startDate) {
+          const calculatedDay = calculateDaysSinceStart(plan.startDate);
+          if (calculatedDay !== plan.currentDay && calculatedDay <= plan.totalDays) {
+            updatedPlans[planId] = {
+              ...plan,
+              currentDay: calculatedDay,
+            };
+            needsUpdate = true;
+          }
+        }
+      });
+
+      if (needsUpdate) {
+        const userRef = doc(db, 'users', user.uid);
+        await updateDoc(userRef, {
+          readingPlans: updatedPlans,
+        });
+        setReadingPlans(updatedPlans);
+      }
+    } catch (error) {
+      console.error('Error auto-updating reading plans:', error);
+    }
+  };
+
+  // Load today's reading assignment
+  const loadTodayReading = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setTodayReading(null);
+        return;
+      }
+
+      // Find the first active plan
+      const activePlans = Object.values(readingPlans).filter(
+        plan => plan.startDate && plan.currentDay <= plan.totalDays
+      );
+
+      if (activePlans.length === 0) {
+        setTodayReading(null);
+        return;
+      }
+
+      // Use the first active plan (or could prioritize by plan type)
+      const activePlan = activePlans[0];
+      const planInfo = READING_PLANS.find(p => p.id === activePlan.planId);
+      
+      if (!planInfo) {
+        setTodayReading(null);
+        return;
+      }
+
+      const todayDay = activePlan.currentDay;
+      const readingAssignment = getReadingAssignment(activePlan.planId, todayDay);
+      
+      setTodayReadingLoading(true);
+      
+      // Try to fetch the reading
+      try {
+        const result = await fetchBibleChapter(
+          readingAssignment.split(' ')[0], 
+          parseInt(readingAssignment.split(' ')[1])
+        );
+        
+        setTodayReading({
+          plan: planInfo,
+          day: todayDay,
+          totalDays: activePlan.totalDays,
+          assignment: readingAssignment,
+          content: result,
+          planId: activePlan.planId,
+        });
+      } catch (error) {
+        // If chapter fetch fails, still show the assignment
+        setTodayReading({
+          plan: planInfo,
+          day: todayDay,
+          totalDays: activePlan.totalDays,
+          assignment: readingAssignment,
+          content: null,
+          planId: activePlan.planId,
+        });
+      }
+    } catch (error) {
+      console.error('Error loading today reading:', error);
+      setTodayReading(null);
+    } finally {
+      setTodayReadingLoading(false);
+    }
+  };
+
+  const startReadingPlan = async (plan) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert('Login Required', 'Please login to start a reading plan');
+        return;
+      }
+
+      const userRef = doc(db, 'users', user.uid);
+      const planData = {
+        planId: plan.id,
+        planName: plan.name,
+        startDate: new Date().toISOString(),
+        daysCompleted: [],
+        currentDay: 1,
+        totalDays: plan.days,
+      };
+
+      await updateDoc(userRef, {
+        readingPlans: {
+          ...readingPlans,
+          [plan.id]: planData,
+        },
+      });
+
+      setReadingPlans({
+        ...readingPlans,
+        [plan.id]: planData,
+      });
+
+      // Load today's reading immediately
+      await loadTodayReading();
+
+      Alert.alert('Success', `Started ${plan.name}! Your reading plan will automatically advance each day.`);
+    } catch (error) {
+      console.error('Error starting reading plan:', error);
+      Alert.alert('Error', 'Failed to start reading plan. Please try again.');
+    }
+  };
+
+  const markDayComplete = async (planId, day) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const userRef = doc(db, 'users', user.uid);
+      const plan = readingPlans[planId];
+      
+      if (!plan) return;
+
+      // Ensure daysCompleted is always an array
+      const daysCompleted = Array.isArray(plan.daysCompleted) 
+        ? plan.daysCompleted 
+        : (plan.daysCompleted ? [plan.daysCompleted] : []);
+      
+      if (daysCompleted.includes(day)) {
+        // Unmark if already completed
+        const updatedDays = daysCompleted.filter(d => d !== day);
+        await updateDoc(userRef, {
+          [`readingPlans.${planId}.daysCompleted`]: updatedDays,
+        });
+        setReadingPlans({
+          ...readingPlans,
+          [planId]: {
+            ...plan,
+            daysCompleted: updatedDays,
+          },
+        });
+      } else {
+        // Mark as complete
+        const updatedDays = [...daysCompleted, day].sort((a, b) => a - b);
+        await updateDoc(userRef, {
+          [`readingPlans.${planId}.daysCompleted`]: updatedDays,
+        });
+        setReadingPlans({
+          ...readingPlans,
+          [planId]: {
+            ...plan,
+            daysCompleted: updatedDays,
+          },
+        });
+        
+        // If marking today's reading as complete, refresh today's reading
+        if (day === plan.currentDay) {
+          setTimeout(() => loadTodayReading(), 500);
+        }
+      }
+    } catch (error) {
+      console.error('Error marking day complete:', error);
+      Alert.alert('Error', 'Failed to update progress');
+    }
+  };
+
+  // Mark today's reading as complete
+  const markTodayComplete = async () => {
+    if (!todayReading) return;
+    await markDayComplete(todayReading.planId, todayReading.day);
+  };
+
+  const loadChapter = async (bookName, chapter) => {
+    try {
+      setLoadingChapter(true);
+      setSelectedChapter(chapter);
+      
+      // Helper function to delay between requests
+      const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      
+      // Strategy 1: Try to fetch the entire chapter using the utility function
+      // This tries multiple approaches (full chapter, then range)
+      let result = await fetchBibleChapter(bookName, chapter);
+      
+      if (result && !result.error && result.text) {
+        // Check if we have a verses array with individual verse numbers
+        if (result.verses && Array.isArray(result.verses) && result.verses.length > 0) {
+          // Use the verses array from the API which includes verse numbers
+          const verses = result.verses.map((v, idx) => {
+            // Extract verse number from various possible property names
+            const verseNum = v.verse !== undefined ? v.verse : 
+                           (v.verse_number !== undefined ? v.verse_number : 
+                           (v.verseNum !== undefined ? v.verseNum : idx + 1));
+            return {
+              verse: typeof verseNum === 'number' ? verseNum : parseInt(verseNum) || (idx + 1),
+              text: v.text || '',
+              reference: result.reference,
+            };
+          });
+          setChapterVerses(verses);
+        } else {
+          // Fallback: if no verses array, try to parse the text or use individual verse fetching
+          // For now, we'll still try individual verses as fallback
+          const verses = [];
+          const maxIndividualVerses = 50;
+          
+          for (let verse = 1; verse <= maxIndividualVerses; verse++) {
+            if (verse > 1) {
+              await delay(300); // Shorter delay for fallback
+            }
+            
+            try {
+              const reference = `${bookName} ${chapter}:${verse}`;
+              const verseResult = await fetchBibleVerse(reference);
+              
+              if (verseResult && !verseResult.error && verseResult.text) {
+                verses.push({
+                  verse: verse,
+                  text: verseResult.text,
+                  reference: verseResult.reference,
+                });
+              } else {
+                break; // End of chapter
+              }
+            } catch (error) {
+              console.error(`Error loading verse ${verse}:`, error);
+              break;
+            }
+          }
+          
+          if (verses.length > 0) {
+            setChapterVerses(verses);
+          } else {
+            // Last resort: show the full chapter text
+            setChapterVerses([{
+              verse: 0,
+              text: result.text,
+              reference: result.reference,
+            }]);
+          }
+        }
+        setChapterViewVisible(true);
+        setBookModalVisible(false);
+        setLoadingChapter(false);
+        return;
+      }
+
+      // Strategy 2: Fallback - fetch individual verses with delays (limited to avoid rate limits)
+      // Only fetch first 10 verses to avoid hitting rate limits
+      const verses = [];
+      const maxIndividualVerses = 10;
+      
+      for (let verse = 1; verse <= maxIndividualVerses; verse++) {
+        // Add delay between requests to avoid rate limiting
+        if (verse > 1) {
+          await delay(800); // 800ms delay between requests to be safer
+        }
+        
+        try {
+          const reference = `${bookName} ${chapter}:${verse}`;
+          const verseResult = await fetchBibleVerse(reference);
+          
+          if (verseResult && !verseResult.error && verseResult.text) {
+            verses.push({
+              verse: verse,
+              text: verseResult.text,
+              reference: verseResult.reference,
+            });
+          } else {
+            // Check if it's a rate limit error
+            if (verseResult?.error?.includes('Too many requests') || verseResult?.error?.includes('rate')) {
+              Alert.alert(
+                'Rate Limit Reached',
+                'Too many requests. Please wait 30-60 seconds before trying again.',
+                [{ text: 'OK' }]
+              );
+              setChapterVerses(verses.length > 0 ? verses : []);
+              setLoadingChapter(false);
+              return;
+            }
+            // Otherwise, assume end of chapter
+            break;
+          }
+        } catch (error) {
+          console.error(`Error loading verse ${verse}:`, error);
+          if (error.message?.includes('429') || error.message?.includes('rate')) {
+            Alert.alert(
+              'Rate Limit Reached',
+              'Too many requests. Please wait 30-60 seconds before trying again.',
+              [{ text: 'OK' }]
+            );
+            break;
+          }
+          // Continue to next verse or stop if we have some verses
+          if (verses.length === 0) break;
+        }
+      }
+
+      if (verses.length > 0) {
+        setChapterVerses(verses);
+        setChapterViewVisible(true);
+        setBookModalVisible(false);
+      } else {
+        setChapterVerses([]);
+        Alert.alert(
+          'Unable to Load Chapter',
+          'Could not load this chapter. This might be due to rate limiting. Please wait 30-60 seconds and try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error loading chapter:', error);
+      const isRateLimit = error.message?.includes('429') || error.message?.includes('rate');
+      Alert.alert(
+        'Error',
+        isRateLimit
+          ? 'Too many requests. Please wait 30-60 seconds before trying again.'
+          : 'Failed to load chapter. Please try again.'
+      );
+      setChapterVerses([]);
+    } finally {
+      setLoadingChapter(false);
     }
   };
 
@@ -278,8 +792,21 @@ export default function BibleScreen({ navigation }) {
         </View>
         {loading ? (
           <ActivityIndicator size="large" color="#6366f1" style={styles.loader} />
+        ) : verseOfTheDay ? (
+          renderVerseCard(verseOfTheDay)
         ) : (
-          verseOfTheDay && renderVerseCard(verseOfTheDay)
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle-outline" size={24} color="#ef4444" />
+            <Text style={styles.errorText}>
+              Failed to load verse of the day. Please check your internet connection and try again.
+            </Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={loadVerseOfTheDay}
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -356,49 +883,157 @@ export default function BibleScreen({ navigation }) {
     </ScrollView>
   );
 
-  const renderReadingPlans = () => (
-    <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Reading Plans</Text>
-        <Text style={styles.sectionDescription}>
-          Choose a reading plan to guide your daily Bible reading
-        </Text>
-      </View>
+  const renderReadingPlans = () => {
+    const getPlanProgress = (planId) => {
+      const plan = readingPlans[planId];
+      if (!plan) return null;
+      const daysCompleted = plan.daysCompleted || [];
+      const progress = (daysCompleted.length / plan.totalDays) * 100;
+      return {
+        ...plan,
+        progress: Math.round(progress),
+        daysCompletedCount: daysCompleted.length, // Keep count separate
+        daysCompletedArray: daysCompleted, // Keep the array for checking
+      };
+    };
 
-      {READING_PLANS.map((plan) => (
-        <TouchableOpacity
-          key={plan.id}
-          style={styles.planCard}
-          onPress={() => {
-            setSelectedPlan(plan);
-            Alert.alert(
-              plan.name,
-              `${plan.description}\n\nThis plan will help you read through ${plan.days} days of Bible reading.`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Start Plan', onPress: () => {
-                  // TODO: Implement reading plan tracking
-                  Alert.alert('Coming Soon', 'Reading plan tracking will be available soon!');
-                }},
-              ]
-            );
-          }}
-        >
-          <View style={styles.planHeader}>
-            <Ionicons name="calendar-outline" size={24} color="#6366f1" />
-            <View style={styles.planInfo}>
-              <Text style={styles.planName}>{plan.name}</Text>
-              <Text style={styles.planDescription}>{plan.description}</Text>
+    const isTodayCompleted = todayReading && readingPlans[todayReading.planId]?.daysCompleted?.includes(todayReading.day);
+
+    return (
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Today's Reading Section */}
+        {todayReading && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="calendar" size={24} color="#6366f1" />
+              <Text style={styles.sectionTitle}>Today's Reading</Text>
+            </View>
+            <View style={styles.todayReadingCard}>
+              <View style={styles.todayReadingHeader}>
+                <View>
+                  <Text style={styles.todayReadingPlan}>{todayReading.plan.name}</Text>
+                  <Text style={styles.todayReadingDay}>Day {todayReading.day} of {todayReading.totalDays}</Text>
+                </View>
+                {isTodayCompleted && (
+                  <View style={styles.completedBadge}>
+                    <Ionicons name="checkmark-circle" size={24} color="#10b981" />
+                  </View>
+                )}
+              </View>
+              <View style={styles.todayReadingAssignment}>
+                <Ionicons name="book" size={20} color="#6366f1" />
+                <Text style={styles.todayReadingText}>{todayReading.assignment}</Text>
+              </View>
+              {todayReading.content && todayReading.content.text && (
+                <View style={styles.todayReadingPreview}>
+                  <Text style={styles.todayReadingPreviewText} numberOfLines={3}>
+                    {todayReading.content.text}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.todayReadingActions}>
+                <TouchableOpacity
+                  style={[styles.todayActionButton, isTodayCompleted && styles.todayActionButtonCompleted]}
+                  onPress={markTodayComplete}
+                >
+                  <Ionicons 
+                    name={isTodayCompleted ? "checkmark-circle" : "checkmark-circle-outline"} 
+                    size={20} 
+                    color={isTodayCompleted ? "#fff" : "#6366f1"} 
+                  />
+                  <Text style={[styles.todayActionText, isTodayCompleted && styles.todayActionTextCompleted]}>
+                    {isTodayCompleted ? 'Completed' : 'Mark Complete'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.todayActionButton, styles.todayActionButtonSecondary]}
+                  onPress={() => {
+                    const [book, chapter] = todayReading.assignment.split(' ');
+                    loadChapter(book, parseInt(chapter));
+                  }}
+                >
+                  <Ionicons name="book-outline" size={20} color="#6366f1" />
+                  <Text style={styles.todayActionText}>Read Now</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-          <View style={styles.planFooter}>
-            <Text style={styles.planDays}>{plan.days} days</Text>
-            <Ionicons name="chevron-forward" size={20} color="#6b7280" />
-          </View>
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
-  );
+        )}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Reading Plans</Text>
+          <Text style={styles.sectionDescription}>
+            {todayReading 
+              ? 'Your reading plan automatically advances each day. Start a new plan to read multiple books.'
+              : 'Choose a reading plan to guide your daily Bible reading. Plans automatically advance each day.'}
+          </Text>
+        </View>
+
+        {READING_PLANS.map((plan) => {
+          const progress = getPlanProgress(plan.id);
+          const isActive = progress !== null;
+
+          return (
+            <TouchableOpacity
+              key={plan.id}
+              style={[styles.planCard, isActive && styles.planCardActive]}
+              onPress={() => {
+                if (isActive) {
+                  // Show progress modal - keep the full plan data with array
+                  const fullPlan = readingPlans[plan.id];
+                  setSelectedPlan({ 
+                    ...plan, 
+                    ...fullPlan, // Include the full plan data with daysCompleted array
+                    progress: progress.progress,
+                    daysCompletedCount: progress.daysCompletedCount,
+                  });
+                  setChapterModalVisible(true);
+                } else {
+                  // Start new plan
+                  Alert.alert(
+                    plan.name,
+                    `${plan.description}\n\nThis plan will help you read through ${plan.days} days of Bible reading.`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Start Plan', onPress: () => startReadingPlan(plan) },
+                    ]
+                  );
+                }
+              }}
+            >
+              <View style={styles.planHeader}>
+                <Ionicons 
+                  name={isActive ? "checkmark-circle" : "calendar-outline"} 
+                  size={24} 
+                  color={isActive ? "#10b981" : "#6366f1"} 
+                />
+                <View style={styles.planInfo}>
+                  <Text style={styles.planName}>{plan.name}</Text>
+                  <Text style={styles.planDescription}>{plan.description}</Text>
+                  {isActive && (
+                    <View style={styles.progressContainer}>
+                      <View style={styles.progressBar}>
+                        <View 
+                          style={[styles.progressFill, { width: `${progress.progress}%` }]} 
+                        />
+                      </View>
+                      <Text style={styles.progressText}>
+                        {progress.daysCompletedCount} of {plan.days} days ({progress.progress}%)
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+              <View style={styles.planFooter}>
+                <Text style={styles.planDays}>{plan.days} days</Text>
+                <Ionicons name="chevron-forward" size={20} color="#6b7280" />
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    );
+  };
 
   const renderBookmarks = () => (
     <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -523,20 +1158,210 @@ export default function BibleScreen({ navigation }) {
         visible={bookModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setBookModalVisible(false)}
+        onRequestClose={() => {
+          setBookModalVisible(false);
+          setSelectedBook(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Book</Text>
-              <TouchableOpacity onPress={() => setBookModalVisible(false)}>
+              <Text style={styles.modalTitle}>
+                {selectedBook ? `${selectedBook.name} - Select Chapter` : 'Select Book'}
+              </Text>
+              <TouchableOpacity 
+                onPress={() => {
+                  if (selectedBook) {
+                    setSelectedBook(null);
+                  } else {
+                    setBookModalVisible(false);
+                  }
+                }}
+              >
+                <Ionicons name={selectedBook ? "arrow-back" : "close"} size={24} color="#1f2937" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              {!selectedBook ? (
+                <View style={styles.booksGrid}>
+                  {BIBLE_BOOKS.map((book) => (
+                    <TouchableOpacity
+                      key={book.name}
+                      style={styles.bookCard}
+                      onPress={() => setSelectedBook(book)}
+                    >
+                      <Text style={styles.bookName}>{book.name}</Text>
+                      <Text style={styles.bookChapters}>{book.chapters} chapters</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.chaptersGrid}>
+                  {Array.from({ length: selectedBook.chapters }, (_, i) => i + 1).map((chapter) => (
+                    <TouchableOpacity
+                      key={chapter}
+                      style={styles.chapterCard}
+                      onPress={() => {
+                        // Show confirmation before loading
+                        Alert.alert(
+                          'Load Chapter',
+                          `Load ${selectedBook.name} Chapter ${chapter}?`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { 
+                              text: 'Load', 
+                              onPress: () => loadChapter(selectedBook.name, chapter)
+                            },
+                          ]
+                        );
+                      }}
+                      disabled={loadingChapter}
+                    >
+                      <Text style={styles.chapterNumber}>{chapter}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {loadingChapter && (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#6366f1" />
+                  <Text style={styles.loadingText}>Loading chapter...</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Chapter View Modal */}
+      <Modal
+        visible={chapterViewVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setChapterViewVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedBook ? `${selectedBook.name} ${selectedChapter}` : 'Chapter'}
+              </Text>
+              <TouchableOpacity onPress={() => setChapterViewVisible(false)}>
+                <Ionicons name="close" size={24} color="#1f2937" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.chapterScrollView}>
+              {chapterVerses.length > 0 ? (
+                chapterVerses.map((verse, index) => (
+                  <View key={index} style={styles.verseInChapter}>
+                    {verse.verse > 0 && (
+                      <Text style={styles.verseNumber}>{verse.verse}</Text>
+                    )}
+                    <Text style={styles.verseTextInChapter}>{verse.text}</Text>
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="book-outline" size={48} color="#9ca3af" />
+                  <Text style={styles.emptyText}>No verses found</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Reading Plan Progress Modal */}
+      <Modal
+        visible={chapterModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setChapterModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedPlan ? selectedPlan.planName : 'Reading Plan Progress'}
+              </Text>
+              <TouchableOpacity onPress={() => setChapterModalVisible(false)}>
                 <Ionicons name="close" size={24} color="#1f2937" />
               </TouchableOpacity>
             </View>
             <ScrollView>
-              <Text style={styles.modalHint}>
-                Browse by book feature coming soon!
-              </Text>
+              {selectedPlan && (
+                <View style={styles.progressModalContent}>
+                  <View style={styles.progressStats}>
+                    <View style={styles.statCard}>
+                      <Text style={styles.statValue}>
+                        {(selectedPlan.daysCompleted && Array.isArray(selectedPlan.daysCompleted) 
+                          ? selectedPlan.daysCompleted.length 
+                          : selectedPlan.daysCompletedCount) || 0}
+                      </Text>
+                      <Text style={styles.statLabel}>Days Completed</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                      <Text style={styles.statValue}>
+                        {selectedPlan.totalDays - ((selectedPlan.daysCompleted && Array.isArray(selectedPlan.daysCompleted) 
+                          ? selectedPlan.daysCompleted.length 
+                          : selectedPlan.daysCompletedCount) || 0)}
+                      </Text>
+                      <Text style={styles.statLabel}>Days Remaining</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                      <Text style={styles.statValue}>{selectedPlan.progress || 0}%</Text>
+                      <Text style={styles.statLabel}>Progress</Text>
+                    </View>
+                  </View>
+                  <View style={styles.progressBar}>
+                    <View 
+                      style={[styles.progressFill, { width: `${selectedPlan.progress || 0}%` }]} 
+                    />
+                  </View>
+                  <Text style={styles.sectionTitle}>Mark Days Complete</Text>
+                  <View style={styles.daysGrid}>
+                    {Array.from({ length: Math.min(selectedPlan.totalDays, 30) }, (_, i) => i + 1).map((day) => {
+                      const daysCompletedArray = selectedPlan.daysCompleted && Array.isArray(selectedPlan.daysCompleted) 
+                        ? selectedPlan.daysCompleted 
+                        : [];
+                      const isCompleted = daysCompletedArray.includes(day);
+                      return (
+                        <TouchableOpacity
+                          key={day}
+                          style={[styles.dayCard, isCompleted && styles.dayCardCompleted]}
+                          onPress={async () => {
+                            await markDayComplete(selectedPlan.planId, day);
+                            // Refresh selectedPlan to reflect the update
+                            const updatedPlan = readingPlans[selectedPlan.planId];
+                            if (updatedPlan) {
+                              const daysCompleted = updatedPlan.daysCompleted || [];
+                              const progress = Math.round((daysCompleted.length / selectedPlan.totalDays) * 100);
+                              setSelectedPlan({
+                                ...selectedPlan,
+                                ...updatedPlan,
+                                progress: progress,
+                                daysCompletedCount: daysCompleted.length,
+                              });
+                            }
+                          }}
+                        >
+                          <Text style={[styles.dayNumber, isCompleted && styles.dayNumberCompleted]}>
+                            {day}
+                          </Text>
+                          {isCompleted && (
+                            <Ionicons name="checkmark" size={16} color="#fff" />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {selectedPlan.totalDays > 30 && (
+                    <Text style={styles.moreDaysText}>
+                      ... and {selectedPlan.totalDays - 30} more days
+                    </Text>
+                  )}
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -797,6 +1622,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#dc2626',
     textAlign: 'center',
+    marginBottom: 15,
+  },
+  retryButton: {
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   loader: {
     marginVertical: 40,
@@ -829,6 +1667,260 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
     padding: 20,
+  },
+  planCardActive: {
+    borderWidth: 2,
+    borderColor: '#10b981',
+  },
+  progressContainer: {
+    marginTop: 10,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#10b981',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  booksGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  bookCard: {
+    width: '48%',
+    backgroundColor: '#f3f4f6',
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  bookName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  bookChapters: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  chaptersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  chapterCard: {
+    width: '18%',
+    aspectRatio: 1,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    marginBottom: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chapterNumber: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  chapterScrollView: {
+    maxHeight: 500,
+  },
+  verseInChapter: {
+    flexDirection: 'row',
+    marginBottom: 15,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  verseNumber: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#6366f1',
+    marginRight: 10,
+    minWidth: 30,
+  },
+  verseTextInChapter: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#1f2937',
+  },
+  progressModalContent: {
+    paddingVertical: 10,
+  },
+  progressStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 5,
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#6366f1',
+    marginBottom: 5,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+  },
+  daysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 15,
+  },
+  dayCard: {
+    width: '18%',
+    aspectRatio: 1,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    marginBottom: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  dayCardCompleted: {
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+  },
+  dayNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  dayNumberCompleted: {
+    color: '#fff',
+  },
+  moreDaysText: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginTop: 10,
+    fontStyle: 'italic',
+  },
+  todayReadingCard: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 2,
+    borderColor: '#6366f1',
+  },
+  todayReadingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  todayReadingPlan: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  todayReadingDay: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  completedBadge: {
+    backgroundColor: '#d1fae5',
+    borderRadius: 20,
+    padding: 4,
+  },
+  todayReadingAssignment: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+  todayReadingText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6366f1',
+    marginLeft: 10,
+  },
+  todayReadingPreview: {
+    backgroundColor: '#f9fafb',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 15,
+    borderLeftWidth: 4,
+    borderLeftColor: '#6366f1',
+  },
+  todayReadingPreviewText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#4b5563',
+    fontStyle: 'italic',
+  },
+  todayReadingActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  todayActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#ede9fe',
+    borderWidth: 2,
+    borderColor: '#6366f1',
+  },
+  todayActionButtonCompleted: {
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+  },
+  todayActionButtonSecondary: {
+    backgroundColor: '#fff',
+  },
+  todayActionText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  todayActionTextCompleted: {
+    color: '#fff',
   },
 });
 

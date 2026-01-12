@@ -159,6 +159,26 @@ service cloud.firestore {
       allow update: if request.auth != null; // Users can add photos
     }
     
+    // Children Profiles - parents can manage their own children profiles, admins can read all
+    match /childrenProfiles/{profileId} {
+      // Allow read if user is authenticated and is the parent, or if admin
+      // For queries, Firestore checks each document - this allows documents where parentId matches
+      allow read: if request.auth != null && (
+        resource.data.parentId == request.auth.uid || 
+        isAdmin()
+      );
+      allow create: if request.auth != null && 
+        request.resource.data.parentId == request.auth.uid;
+      allow update: if request.auth != null && (
+        resource.data.parentId == request.auth.uid || 
+        isAdmin()
+      );
+      allow delete: if request.auth != null && (
+        resource.data.parentId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+    
     // Children Check-Ins - parents can read their own, admins can read all
     match /childrenCheckIns/{checkInId} {
       // Allow read if user is authenticated and is the parent, or if admin
