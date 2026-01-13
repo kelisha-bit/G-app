@@ -63,6 +63,9 @@ ui-debug.log
 .env.test.local
 .env.production.local
 
+# VAPID keys
+.vapid-private-key.txt
+
 # Logs
 logs
 *.log

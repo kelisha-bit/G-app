@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +22,10 @@ export default function MinistriesScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [userMemberships, setUserMemberships] = useState([]);
+  const [membersModalVisible, setMembersModalVisible] = useState(false);
+  const [selectedMinistry, setSelectedMinistry] = useState(null);
+  const [ministryMembers, setMinistryMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
 
   useEffect(() => {
     loadMinistries();
@@ -51,6 +57,57 @@ export default function MinistriesScreen({ navigation }) {
       setMinistries(getFallbackMinistries());
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMinistryMembers = async (ministry) => {
+    try {
+      setLoadingMembers(true);
+      setSelectedMinistry(ministry);
+      setMembersModalVisible(true);
+      
+      const memberIds = ministry.members || [];
+      
+      if (memberIds.length === 0) {
+        setMinistryMembers([]);
+        setLoadingMembers(false);
+        return;
+      }
+
+      // Fetch user details for each member ID
+      const memberPromises = memberIds.map(async (userId) => {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            return {
+              id: userId,
+              displayName: userData.displayName || 'Unknown User',
+              email: userData.email || '',
+              photoURL: userData.photoURL || null,
+              phoneNumber: userData.phoneNumber || '',
+            };
+          }
+          return null;
+        } catch (error) {
+          console.error(`Error loading user ${userId}:`, error);
+          return {
+            id: userId,
+            displayName: 'Unknown User',
+            email: '',
+            photoURL: null,
+            phoneNumber: '',
+          };
+        }
+      });
+
+      const members = await Promise.all(memberPromises);
+      setMinistryMembers(members.filter(m => m !== null));
+    } catch (error) {
+      console.error('Error loading ministry members:', error);
+      Alert.alert('Error', 'Failed to load ministry members');
+    } finally {
+      setLoadingMembers(false);
     }
   };
 
@@ -379,6 +436,18 @@ export default function MinistriesScreen({ navigation }) {
                     )}
                   </View>
 
+                  {(ministry.memberCount > 0) && (
+                    <TouchableOpacity 
+                      style={styles.viewMembersButton}
+                      onPress={() => loadMinistryMembers(ministry)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="people" size={18} color="#6366f1" />
+                      <Text style={styles.viewMembersButtonText}>View Members</Text>
+                      <Ionicons name="chevron-forward" size={18} color="#6366f1" />
+                    </TouchableOpacity>
+                  )}
+
                   <TouchableOpacity 
                     style={[
                       styles.joinButton,
@@ -403,6 +472,80 @@ export default function MinistriesScreen({ navigation }) {
 
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      {/* Members Modal */}
+      <Modal
+        visible={membersModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setMembersModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedMinistry?.name} Members
+              </Text>
+              <TouchableOpacity
+                onPress={() => setMembersModalVisible(false)}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={24} color="#1f2937" />
+              </TouchableOpacity>
+            </View>
+
+            {loadingMembers ? (
+              <View style={styles.modalLoadingContainer}>
+                <ActivityIndicator size="large" color="#6366f1" />
+                <Text style={styles.modalLoadingText}>Loading members...</Text>
+              </View>
+            ) : ministryMembers.length === 0 ? (
+              <View style={styles.modalEmptyContainer}>
+                <Ionicons name="people-outline" size={64} color="#d1d5db" />
+                <Text style={styles.modalEmptyText}>No members yet</Text>
+                <Text style={styles.modalEmptySubtext}>
+                  Be the first to join this ministry!
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={ministryMembers}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <View style={styles.memberItem}>
+                    <View style={styles.memberAvatarContainer}>
+                      {item.photoURL ? (
+                        <Image
+                          source={{ uri: item.photoURL }}
+                          style={styles.memberAvatar}
+                        />
+                      ) : (
+                        <View style={styles.memberAvatarPlaceholder}>
+                          <Ionicons name="person" size={24} color="#6366f1" />
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.memberInfo}>
+                      <Text style={styles.memberName}>{item.displayName}</Text>
+                      {item.email && (
+                        <Text style={styles.memberEmail}>{item.email}</Text>
+                      )}
+                      {item.phoneNumber && (
+                        <View style={styles.memberPhoneRow}>
+                          <Ionicons name="call-outline" size={14} color="#6b7280" />
+                          <Text style={styles.memberPhone}>{item.phoneNumber}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+                contentContainerStyle={styles.membersList}
+                showsVerticalScrollIndicator={true}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -594,6 +737,132 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     marginRight: 5,
+  },
+  viewMembersButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ede9fe',
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#ddd6fe',
+  },
+  viewMembersButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6366f1',
+    marginHorizontal: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
+    maxHeight: '80%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    flex: 1,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalLoadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalLoadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  modalEmptyContainer: {
+    padding: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  modalEmptySubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+  },
+  membersList: {
+    padding: 20,
+  },
+  memberItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  memberAvatarContainer: {
+    marginRight: 12,
+  },
+  memberAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#e5e7eb',
+  },
+  memberAvatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#ede9fe',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  memberEmail: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  memberPhoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  memberPhone: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginLeft: 4,
   },
 });
 

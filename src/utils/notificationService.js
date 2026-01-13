@@ -23,26 +23,48 @@ class NotificationService {
    * Request notification permissions from the user
    */
   async requestPermissions() {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-
-    if (finalStatus !== 'granted') {
-      console.warn('Failed to get push token for push notification!');
+    // Push notifications are not supported on web
+    if (Platform.OS === 'web') {
       return false;
     }
 
-    return true;
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        if (__DEV__) {
+          console.warn('Failed to get push token for push notification! Permission not granted.');
+        }
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('Error requesting notification permissions:', error);
+      }
+      return false;
+    }
   }
 
   /**
    * Register device for push notifications and save token to Firebase
    */
   async registerForPushNotifications() {
+    // Push notifications are not supported on web
+    if (Platform.OS === 'web') {
+      if (__DEV__) {
+        console.log('Push notifications are not supported on web platform');
+      }
+      return null;
+    }
+
     try {
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
@@ -55,7 +77,9 @@ class NotificationService {
       });
 
       this.expoPushToken = token.data;
-      console.log('Expo Push Token:', this.expoPushToken);
+      if (__DEV__) {
+        console.log('Expo Push Token:', this.expoPushToken);
+      }
 
       // Save token to Firebase
       const user = auth.currentUser;
@@ -92,7 +116,9 @@ class NotificationService {
 
       return this.expoPushToken;
     } catch (error) {
-      console.error('Error registering for push notifications:', error);
+      if (__DEV__) {
+        console.error('Error registering for push notifications:', error);
+      }
       return null;
     }
   }
@@ -160,6 +186,14 @@ class NotificationService {
    * Schedule a local notification
    */
   async scheduleLocalNotification(title, body, data = {}, trigger = null) {
+    // Local notifications are not fully supported on web
+    if (Platform.OS === 'web') {
+      if (__DEV__) {
+        console.log('Local notifications are not supported on web platform');
+      }
+      return null;
+    }
+
     try {
       // Format trigger properly for Expo Notifications
       // Expo requires trigger to have a 'type' property
@@ -208,7 +242,9 @@ class NotificationService {
 
       return notificationId;
     } catch (error) {
-      console.error('Error scheduling notification:', error);
+      if (__DEV__) {
+        console.error('Error scheduling notification:', error);
+      }
       return null;
     }
   }
@@ -318,26 +354,41 @@ class NotificationService {
    * Setup notification listeners
    */
   setupNotificationListeners(navigation) {
-    // Listener for notifications received while app is foregrounded
-    this.notificationListener = Notifications.addNotificationReceivedListener(notification => {
-      console.log('Notification received:', notification);
-      // You can handle foreground notifications here
-    });
+    // Notification listeners are not supported on web
+    if (Platform.OS === 'web') {
+      return;
+    }
 
-    // Listener for when user taps on notification
-    this.responseListener = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      console.log('Notification tapped:', data);
-
-      // Navigate based on notification data
-      if (data.screen && navigation) {
-        if (data.eventId) {
-          navigation.navigate(data.screen, { eventId: data.eventId });
-        } else {
-          navigation.navigate(data.screen);
+    try {
+      // Listener for notifications received while app is foregrounded
+      this.notificationListener = Notifications.addNotificationReceivedListener(notification => {
+        if (__DEV__) {
+          console.log('Notification received:', notification);
         }
+        // You can handle foreground notifications here
+      });
+
+      // Listener for when user taps on notification
+      this.responseListener = Notifications.addNotificationResponseReceivedListener(response => {
+        const data = response.notification.request.content.data;
+        if (__DEV__) {
+          console.log('Notification tapped:', data);
+        }
+
+        // Navigate based on notification data
+        if (data.screen && navigation) {
+          if (data.eventId) {
+            navigation.navigate(data.screen, { eventId: data.eventId });
+          } else {
+            navigation.navigate(data.screen);
+          }
+        }
+      });
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('Error setting up notification listeners:', error);
       }
-    });
+    }
   }
 
   /**
@@ -358,8 +409,20 @@ class NotificationService {
    * Check if user has notification permissions enabled
    */
   async checkPermissions() {
-    const { status } = await Notifications.getPermissionsAsync();
-    return status === 'granted';
+    // Push notifications are not supported on web
+    if (Platform.OS === 'web') {
+      return false;
+    }
+
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      return status === 'granted';
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('Error checking notification permissions:', error);
+      }
+      return false;
+    }
   }
 
   /**

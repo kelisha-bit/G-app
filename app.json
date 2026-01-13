@@ -2,7 +2,7 @@
   "expo": {
     "name": "Greater Works City Church",
     "slug": "greater-works-city-church",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -50,6 +50,9 @@
         "resizeMode": "contain",
         "backgroundColor": "#6366f1"
       }
+    },
+    "notification": {
+      "vapidPublicKey": "BI_JwbP_B2ykIG71KLcqnJ8ejqmNWdYGAhA87bHvOHHLwQ33Vfdur4JTW12kFfiPfsYsBJBq_LyLwvJHYueK_mg"
     },
     "plugins": [
       [

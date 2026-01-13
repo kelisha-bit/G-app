@@ -8,6 +8,7 @@ import {
   Alert,
   Image,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -168,25 +169,40 @@ export default function ProfileScreen({ navigation }) {
     if (item.screen) {
       navigation.navigate(item.screen);
     } else {
-      Alert.alert('Coming Soon', `${item.title} feature will be available soon!`);
+      if (Platform.OS === 'web') {
+        window.alert(`${item.title} feature will be available soon!`);
+      } else {
+        Alert.alert('Coming Soon', `${item.title} feature will be available soon!`);
+      }
     }
   };
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await signOut(auth);
-          } catch (error) {
-            Alert.alert('Error', 'Failed to logout');
-          }
+    if (Platform.OS === 'web') {
+      // Use browser confirm dialog for web
+      if (window.confirm('Are you sure you want to logout?')) {
+        signOut(auth).catch((error) => {
+          console.error('Logout error:', error);
+          window.alert('Failed to logout. Please try again.');
+        });
+      }
+    } else {
+      // Use React Native Alert for mobile
+      Alert.alert('Logout', 'Are you sure you want to logout?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut(auth);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to logout');
+            }
+          },
         },
-      },
-    ]);
+      ]);
+    }
   };
 
   if (loading) {

@@ -11,15 +11,16 @@
     "seed:departments": "node scripts/seedDepartments.js",
     "seed:ministries": "node scripts/seedMinistries.js",
     "seed:giving": "node scripts/seedGiving.js",
+    "generate:vapid-keys": "node scripts/generateVapidKeys.js",
     "build:android": "eas build --platform android --profile production",
     "build:ios": "eas build --platform ios --profile production",
     "build:preview": "eas build --platform android --profile preview",
     "submit:android": "eas submit --platform android",
-    "submit:ios": "eas submit --platform ios"
+    "submit:ios": "eas submit --platform ios",
+    "deploy:firebase": "powershell -ExecutionPolicy Bypass -File scripts/deploy-firebase.ps1"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
-    "@expo/webpack-config": "^19.0.1",
     "@react-native-async-storage/async-storage": "^2.1.0",
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.13",
