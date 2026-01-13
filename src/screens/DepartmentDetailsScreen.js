@@ -217,19 +217,44 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
 
       if (deptSnap.exists()) {
         const deptData = { id: deptSnap.id, ...deptSnap.data() };
-        setDepartment(deptData);
         
         // Check if current user is a member
         if (deptData.members && currentUser) {
           setIsMember(deptData.members.includes(currentUser.uid));
         }
         
-        // Fetch member names
+        // Fetch member names and sync memberCount
         if (deptData.members && deptData.members.length > 0) {
           const names = await fetchMemberNames(deptData.members);
           setMemberNames(names);
+          
+          // Get valid member IDs from fetched names
+          const validMemberIds = names.map(m => m.id);
+          
+          // If memberCount doesn't match valid members, sync it
+          const actualMemberCount = validMemberIds.length;
+          if (deptData.memberCount !== actualMemberCount) {
+            // Update the department document to sync memberCount and clean up members array
+            try {
+              await updateDoc(deptRef, {
+                memberCount: actualMemberCount,
+                members: validMemberIds, // Remove invalid/deleted user IDs
+              });
+              
+              // Update local state with synced data
+              deptData.memberCount = actualMemberCount;
+              deptData.members = validMemberIds;
+            } catch (syncError) {
+              console.error('Error syncing memberCount:', syncError);
+              // Continue with display even if sync fails
+            }
+          }
+          
+          // Update department state with synced data
+          setDepartment(deptData);
         } else {
           setMemberNames([]);
+          setDepartment(deptData);
         }
       } else {
         // Use fallback data if not in Firebase yet
@@ -373,7 +398,7 @@ export default function DepartmentDetailsScreen({ navigation, route }) {
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Ionicons name="people" size={24} color="#6366f1" />
-              <Text style={styles.statNumber}>{department.memberCount || 0}</Text>
+              <Text style={styles.statNumber}>{memberNames.length || department.memberCount || 0}</Text>
               <Text style={styles.statLabel}>Members</Text>
             </View>
             <View style={styles.statItem}>
