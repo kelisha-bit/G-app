@@ -141,7 +141,7 @@ export default function MinistriesScreen({ navigation }) {
       schedule: 'Saturdays, 5:00 PM',
       memberCount: 120,
       members: [],
-      image: 'https://via.placeholder.com/400x200',
+      image: null,
       description: 'Empowering young people to live for Christ',
       ageRange: '13-35 years',
       contact: '+233 20 123 4567',
@@ -153,7 +153,7 @@ export default function MinistriesScreen({ navigation }) {
       schedule: 'First Saturday, 3:00 PM',
       memberCount: 85,
       members: [],
-      image: 'https://via.placeholder.com/400x200',
+      image: null,
       description: 'Building strong women of faith',
       ageRange: 'All ages',
       contact: '+233 20 234 5678',
@@ -165,7 +165,7 @@ export default function MinistriesScreen({ navigation }) {
       schedule: 'Second Saturday, 6:00 AM',
       memberCount: 70,
       members: [],
-      image: 'https://via.placeholder.com/400x200',
+      image: null,
       description: 'Raising godly men and leaders',
       ageRange: '18+ years',
       contact: '+233 20 345 6789',
@@ -177,7 +177,7 @@ export default function MinistriesScreen({ navigation }) {
       schedule: 'Sundays, 2:00 PM',
       memberCount: 95,
       members: [],
-      image: 'https://via.placeholder.com/400x200',
+      image: null,
       description: 'Fellowship and growth for singles',
       ageRange: '18-45 years',
       contact: '+233 20 456 7890',
@@ -189,7 +189,7 @@ export default function MinistriesScreen({ navigation }) {
       schedule: 'Third Friday, 7:00 PM',
       memberCount: 60,
       members: [],
-      image: 'https://via.placeholder.com/400x200',
+      image: null,
       description: 'Strengthening marriages and families',
       ageRange: 'Married couples',
       contact: '+233 20 567 8901',
@@ -398,7 +398,13 @@ export default function MinistriesScreen({ navigation }) {
             const isMember = userMemberships.includes(ministry.id);
             return (
               <TouchableOpacity key={ministry.id} style={styles.ministryCard}>
-                <Image source={{ uri: ministry.image }} style={styles.ministryImage} />
+                {ministry.image ? (
+                  <Image source={{ uri: ministry.image }} style={styles.ministryImage} />
+                ) : (
+                  <View style={[styles.ministryImage, { backgroundColor: '#6366f1', justifyContent: 'center', alignItems: 'center' }]}>
+                    <Ionicons name="people" size={48} color="#fff" />
+                  </View>
+                )}
                 {isMember && (
                   <View style={styles.memberBadge}>
                     <Ionicons name="checkmark-circle" size={16} color="#fff" />

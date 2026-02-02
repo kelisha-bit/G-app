@@ -300,6 +300,85 @@ const generatePrayerFromVerse = (verse, verseText) => {
 };
 
 /**
+ * AI Announcement Content Generator
+ * Generates announcement message content based on title, category, and priority
+ */
+export const generateAnnouncementContent = async (title, category = 'General', priority = 'medium') => {
+  try {
+    const priorityContext = {
+      high: 'urgent and requires immediate attention',
+      medium: 'important but not urgent',
+      low: 'informational and non-urgent'
+    };
+
+    const categoryContext = {
+      'General': 'general church information',
+      'Event': 'an upcoming church event',
+      'Urgent': 'an urgent matter requiring immediate action',
+      'Update': 'an update or change to existing information',
+      'Prayer': 'a prayer request or prayer meeting',
+      'Reminder': 'a reminder about something upcoming'
+    };
+
+    const prompt = `Write a clear, professional, and engaging church announcement message for: "${title}". 
+    
+This is a ${priority} priority announcement about ${categoryContext[category] || 'general information'}. 
+The announcement should be ${priorityContext[priority] || 'important'}.
+
+Requirements:
+- 2-4 sentences, clear and concise
+- Professional but warm and welcoming tone
+- Include relevant details that would be helpful
+- End with an encouraging or action-oriented statement
+- Appropriate for a church community audience`;
+
+    const systemPrompt = 'You are a church communications assistant. Write clear, professional, and engaging church announcements that effectively communicate information to the congregation. Keep messages concise, warm, and appropriate for a church setting.';
+
+    const content = await generateAI(prompt, { systemPrompt });
+
+    if (content) {
+      return {
+        message: content.trim(),
+        error: null,
+      };
+    }
+
+    // Fallback
+    return {
+      message: generateAnnouncementFallback(title, category, priority),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      message: null,
+      error: error.message || 'Failed to generate announcement. Please try again.',
+    };
+  }
+};
+
+/**
+ * Fallback announcement content generator
+ */
+const generateAnnouncementFallback = (title, category, priority) => {
+  const categoryMessages = {
+    'General': `We wanted to share an important update with our church family regarding ${title}. This information is relevant to all members of our community. Please take a moment to review this announcement and stay informed. We appreciate your attention to this matter.`,
+    'Event': `We're excited to announce ${title}! This is a wonderful opportunity for our church family to come together. Mark your calendars and plan to join us. More details will be shared soon. We look forward to seeing you there!`,
+    'Urgent': `URGENT: ${title}. This requires immediate attention from all church members. Please read this announcement carefully and take appropriate action as needed. If you have questions, please contact the church office immediately.`,
+    'Update': `We have an important update regarding ${title}. Please review the following information carefully as it may affect your plans or participation. We appreciate your understanding and cooperation.`,
+    'Prayer': `We invite you to join us in prayer regarding ${title}. Your prayers and support are greatly appreciated during this time. Let us come together as a church family to lift this matter up to the Lord.`,
+    'Reminder': `This is a friendly reminder about ${title}. Please make note of this information and plan accordingly. We don't want anyone to miss out on this important opportunity.`
+  };
+
+  const baseMessage = categoryMessages[category] || categoryMessages['General'];
+  
+  if (priority === 'high') {
+    return `URGENT: ${baseMessage}`;
+  }
+  
+  return baseMessage;
+};
+
+/**
  * AI Bible Verse Recommender
  * Suggests relevant Bible verses based on a topic or situation
  */
@@ -415,5 +494,123 @@ export const getAIProviderStatus = () => {
     configured: isAIConfigured(),
     needsApiKey: AI_PROVIDER === 'openai' && !OPENAI_API_KEY,
   };
+};
+
+/**
+ * Chat with AI - Conversational chatbot
+ * Maintains context from previous messages
+ */
+export const chatWithAI = async (userMessage, conversationHistory = []) => {
+  try {
+    // Build conversation context from history (last 10 messages for context)
+    const recentHistory = conversationHistory.slice(-10);
+    const messages = [];
+
+    // System prompt for church assistant
+    const systemPrompt = `You are a helpful and friendly AI assistant for Greater Works City Church. You help church members with:
+- Bible verses and study questions
+- Prayer guidance and spiritual encouragement
+- Information about church events, services, and activities
+- How to use the church app features
+- General spiritual questions and Christian guidance
+
+Be warm, encouraging, and biblically sound. Keep responses concise but helpful (2-4 sentences typically). If asked about specific app features, provide clear step-by-step guidance.`;
+
+    // Add system message
+    messages.push({ role: 'system', content: systemPrompt });
+
+    // Add conversation history
+    recentHistory.forEach((msg) => {
+      if (msg.sender === 'user') {
+        messages.push({ role: 'user', content: msg.text });
+      } else if (msg.sender === 'bot') {
+        messages.push({ role: 'assistant', content: msg.text });
+      }
+    });
+
+    // Add current user message
+    messages.push({ role: 'user', content: userMessage });
+
+    // Use OpenAI chat completion for conversational AI
+    if (AI_PROVIDER === 'openai' && OPENAI_API_KEY) {
+      try {
+        const response = await fetch(OPENAI_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-3.5-turbo',
+            messages: messages,
+            max_tokens: 300,
+            temperature: 0.7,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.choices[0]?.message?.content?.trim() || 'I apologize, but I could not generate a response. Please try again.';
+      } catch (error) {
+        console.error('OpenAI chat error:', error);
+        // Fall through to fallback
+      }
+    }
+
+    // Fallback: Rule-based responses for common questions
+    return generateChatFallback(userMessage);
+  } catch (error) {
+    console.error('Chat AI error:', error);
+    return generateChatFallback(userMessage);
+  }
+};
+
+/**
+ * Fallback chat responses for when AI is unavailable
+ */
+const generateChatFallback = (userMessage) => {
+  const message = userMessage.toLowerCase().trim();
+
+  // Bible verse questions
+  if (message.includes('bible verse') || message.includes('verse') || message.includes('scripture')) {
+    return "I'd be happy to help you find a Bible verse! You can:\n\n• Use the Bible screen in the app to search for verses\n• Ask me for a specific topic (e.g., 'verse about peace')\n• Browse devotionals for daily verses\n\nWhat topic would you like a verse about?";
+  }
+
+  // Prayer questions
+  if (message.includes('prayer') || message.includes('pray')) {
+    return "I can help with prayer! You can:\n\n• Submit prayer requests in the Prayer screen\n• Get help writing prayer requests with AI assistance\n• Find Bible verses for prayer\n\nWould you like help with a specific prayer request?";
+  }
+
+  // Events questions
+  if (message.includes('event') || message.includes('service') || message.includes('meeting')) {
+    return "You can find all church events in the Events screen! There you can:\n\n• View upcoming events\n• Register for events\n• See event details and locations\n• Check in for services\n\nIs there a specific event you're looking for?";
+  }
+
+  // Giving questions
+  if (message.includes('give') || message.includes('donation') || message.includes('tithe') || message.includes('offering')) {
+    return "To give online:\n\n1. Go to the Give screen\n2. Enter the amount\n3. Choose payment method\n4. Complete the transaction\n\nYou can also view your giving history anytime. Need help with a specific step?";
+  }
+
+  // App features
+  if (message.includes('how to') || message.includes('how do i') || message.includes('feature')) {
+    return "I can help you use the app! The app includes:\n\n• Events and check-in\n• Sermons and devotionals\n• Prayer requests\n• Giving and donations\n• Departments and ministries\n• Community feed\n\nWhat would you like to learn about?";
+  }
+
+  // Greetings
+  if (message.includes('hello') || message.includes('hi') || message.includes('hey')) {
+    return "Hello! I'm here to help you with church information, Bible verses, prayer guidance, and app features. How can I assist you today?";
+  }
+
+  // General spiritual questions
+  if (message.includes('god') || message.includes('jesus') || message.includes('faith') || message.includes('christian')) {
+    return "I'd love to help with your spiritual question! For deeper study, I recommend:\n\n• Reading daily devotionals in the app\n• Listening to sermons\n• Joining a small group\n• Speaking with church leadership\n\nWhat specific question can I help with?";
+  }
+
+  // Default response
+  return "I'm here to help! I can assist with:\n\n• Finding Bible verses\n• Prayer guidance\n• Church events and services\n• Using app features\n• Spiritual questions\n\nWhat would you like to know?";
 };
 

@@ -26,7 +26,12 @@ dist/
 *.swo
 *~
 
+# IMPORTANT: google-services.json is needed for Android builds
+# It's in .gitignore but MUST be included in EAS builds
+# Do NOT add it here - it needs to be uploaded
 
+/ios
+/android
 
 
 

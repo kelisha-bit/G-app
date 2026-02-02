@@ -14,6 +14,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { db, storage } from '../../../firebase.config';
 import {
   collection,
@@ -26,6 +27,7 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { sendSermonNotification } from '../../utils/sendPushNotification';
 
 export default function ManageSermonsScreen({ navigation }) {
   const [sermons, setSermons] = useState([]);
@@ -44,6 +46,8 @@ export default function ManageSermonsScreen({ navigation }) {
   const [imageUrl, setImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [series, setSeries] = useState('');
   const [description, setDescription] = useState('');
 
@@ -161,6 +165,131 @@ export default function ManageSermonsScreen({ navigation }) {
     }
   };
 
+  const pickAudio = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['audio/*'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        uploadAudio(result.assets[0].uri, result.assets[0].name);
+      }
+    } catch (error) {
+      console.error('Error picking audio:', error);
+      Alert.alert('Error', 'Failed to pick audio file');
+    }
+  };
+
+  const uploadAudio = async (uri, originalName) => {
+    try {
+      setUploadingAudio(true);
+      
+      // Convert audio to blob
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      // Get file extension from original name
+      const fileExtension = originalName.split('.').pop() || 'mp3';
+      
+      // Create unique filename
+      const timestamp = Date.now();
+      const filename = `sermons/audio/${timestamp}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
+      const storageRef = ref(storage, filename);
+
+      // Upload audio
+      await uploadBytes(storageRef, blob);
+
+      // Get download URL (this is the DIRECT LINK)
+      const downloadURL = await getDownloadURL(storageRef);
+      
+      setAudioUrl(downloadURL);
+      Alert.alert('Success', 'Audio file uploaded successfully! The direct link has been set.');
+    } catch (error) {
+      console.error('Error uploading audio:', error);
+      Alert.alert('Error', 'Failed to upload audio file. Please try again.');
+    } finally {
+      setUploadingAudio(false);
+    }
+  };
+
+  const pickVideo = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'We need access to your media library to upload videos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: false,
+        quality: 1,
+        videoMaxDuration: 3600, // 1 hour max
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        uploadVideo(result.assets[0].uri, result.assets[0].fileName || 'video');
+      }
+    } catch (error) {
+      console.error('Error picking video:', error);
+      Alert.alert('Error', 'Failed to pick video file');
+    }
+  };
+
+  const uploadVideo = async (uri, originalName) => {
+    try {
+      setUploadingVideo(true);
+      
+      // Convert video to blob
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      // Get file extension from original name or default to mp4
+      let fileExtension = 'mp4';
+      if (originalName && originalName.includes('.')) {
+        fileExtension = originalName.split('.').pop().toLowerCase();
+      }
+      
+      // Validate video extension
+      const validExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'];
+      if (!validExtensions.includes(fileExtension)) {
+        fileExtension = 'mp4'; // Default to mp4
+      }
+      
+      // Create unique filename
+      const timestamp = Date.now();
+      const filename = `sermons/video/${timestamp}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
+      const storageRef = ref(storage, filename);
+
+      // Upload video (this may take a while for large files)
+      Alert.alert(
+        'Uploading Video',
+        'Please wait while your video uploads. This may take a few minutes for large files.',
+        [{ text: 'OK' }]
+      );
+
+      await uploadBytes(storageRef, blob);
+
+      // Get download URL (this is the DIRECT LINK)
+      const downloadURL = await getDownloadURL(storageRef);
+      
+      setVideoUrl(downloadURL);
+      Alert.alert('Success', 'Video file uploaded successfully! The direct link has been set.');
+    } catch (error) {
+      console.error('Error uploading video:', error);
+      if (error.code === 'storage/unauthorized') {
+        Alert.alert('Permission Denied', 'You do not have permission to upload videos. Please check your Firebase Storage rules.');
+      } else if (error.message && error.message.includes('size')) {
+        Alert.alert('File Too Large', 'The video file is too large. Please compress it or use a smaller file.');
+      } else {
+        Alert.alert('Error', 'Failed to upload video file. Please try again.');
+      }
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!title || !pastor || !date) {
       Alert.alert('Validation Error', 'Please fill in all required fields');
@@ -175,7 +304,7 @@ export default function ManageSermonsScreen({ navigation }) {
         duration: duration.trim() || '45 min',
         videoUrl: videoUrl.trim(),
         audioUrl: audioUrl.trim(),
-        image: imageUrl.trim() || 'https://via.placeholder.com/400x200',
+        image: imageUrl.trim() || null,
         series: series.trim(),
         description: description.trim(),
         updatedAt: new Date().toISOString(),
@@ -185,12 +314,32 @@ export default function ManageSermonsScreen({ navigation }) {
         await updateDoc(doc(db, 'sermons', selectedSermon.id), sermonData);
         Alert.alert('Success', 'Sermon updated successfully');
       } else {
-        await addDoc(collection(db, 'sermons'), {
+        const docRef = await addDoc(collection(db, 'sermons'), {
           ...sermonData,
           createdAt: new Date().toISOString(),
           views: '0',
         });
-        Alert.alert('Success', 'Sermon created successfully');
+        
+        // Send push notification for new sermons
+        try {
+          const result = await sendSermonNotification({
+            id: docRef.id,
+            title: title.trim(),
+            speaker: pastor.trim(),
+          });
+          
+          if (result.success) {
+            Alert.alert(
+              '✅ Success!',
+              `Sermon created and notification sent to ${result.sentCount} devices!`
+            );
+          } else {
+            Alert.alert('Success', 'Sermon created successfully (notification failed)');
+          }
+        } catch (notifError) {
+          console.error('Error sending sermon notification:', notifError);
+          Alert.alert('Success', 'Sermon created successfully (notification failed)');
+        }
       }
 
       setModalVisible(false);
@@ -422,24 +571,80 @@ export default function ManageSermonsScreen({ navigation }) {
 
             <View style={styles.formGroup}>
               <Text style={styles.label}>Video URL</Text>
-              <TextInput
-                style={styles.input}
-                value={videoUrl}
-                onChangeText={setVideoUrl}
-                placeholder="https://youtube.com/..."
-                placeholderTextColor="#9ca3af"
-              />
+              <View style={styles.urlInputContainer}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  value={videoUrl}
+                  onChangeText={setVideoUrl}
+                  placeholder="Upload video file or paste direct link (MP4, MOV, etc.)"
+                  placeholderTextColor="#9ca3af"
+                  multiline
+                />
+                <TouchableOpacity
+                  style={styles.uploadButton}
+                  onPress={pickVideo}
+                  disabled={uploadingVideo}
+                >
+                  {uploadingVideo ? (
+                    <ActivityIndicator size="small" color="#6366f1" />
+                  ) : (
+                    <>
+                      <Ionicons name="videocam-outline" size={20} color="#6366f1" />
+                      <Text style={styles.uploadButtonText}>Upload</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {videoUrl && (
+                <View style={styles.urlInfoContainer}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                  <Text style={styles.urlInfoText}>
+                    {videoUrl.includes('firebasestorage') ? 'Direct link ready' : 'Paste direct video file link'}
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.helpText}>
+                💡 Tip: Upload video files (MP4, MOV) for best compatibility. YouTube links will work but may have limitations.
+              </Text>
             </View>
 
             <View style={styles.formGroup}>
               <Text style={styles.label}>Audio URL</Text>
-              <TextInput
-                style={styles.input}
-                value={audioUrl}
-                onChangeText={setAudioUrl}
-                placeholder="https://..."
-                placeholderTextColor="#9ca3af"
-              />
+              <View style={styles.urlInputContainer}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  value={audioUrl}
+                  onChangeText={setAudioUrl}
+                  placeholder="Upload audio file or paste direct link (MP3, M4A, etc.)"
+                  placeholderTextColor="#9ca3af"
+                  multiline
+                />
+                <TouchableOpacity
+                  style={styles.uploadButton}
+                  onPress={pickAudio}
+                  disabled={uploadingAudio}
+                >
+                  {uploadingAudio ? (
+                    <ActivityIndicator size="small" color="#6366f1" />
+                  ) : (
+                    <>
+                      <Ionicons name="cloud-upload-outline" size={20} color="#6366f1" />
+                      <Text style={styles.uploadButtonText}>Upload</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {audioUrl && (
+                <View style={styles.urlInfoContainer}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                  <Text style={styles.urlInfoText}>
+                    {audioUrl.includes('firebasestorage') ? 'Direct link ready' : 'Paste direct audio file link'}
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.helpText}>
+                💡 Tip: Upload audio files (MP3, M4A) for best compatibility. Streaming links (YouTube, SoundCloud) will open in browser.
+              </Text>
             </View>
 
             <View style={styles.formGroup}>
@@ -832,18 +1037,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#ede9fe',
     paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     borderRadius: 12,
-    marginBottom: 15,
+    marginLeft: 10,
     borderWidth: 1,
     borderColor: '#ddd6fe',
-    borderStyle: 'dashed',
+    minWidth: 100,
   },
   uploadButtonText: {
-    marginLeft: 8,
-    fontSize: 16,
+    marginLeft: 6,
+    fontSize: 14,
     fontWeight: '600',
     color: '#6366f1',
+  },
+  urlInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  urlInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  urlInfoText: {
+    fontSize: 12,
+    color: '#166534',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  helpText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 8,
+    lineHeight: 16,
   },
   orDivider: {
     flexDirection: 'row',

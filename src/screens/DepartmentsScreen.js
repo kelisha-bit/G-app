@@ -175,6 +175,14 @@ export default function DepartmentsScreen({ navigation }) {
       memberCount: 30,
       description: 'Maintenance and facility management',
     },
+    {
+      id: 'welfare',
+      name: 'Welfare',
+      icon: 'heart',
+      color: '#e91e63',
+      memberCount: 0,
+      description: 'Caring for members in need',
+    },
   ];
 
   const handleDepartmentPress = (dept) => {

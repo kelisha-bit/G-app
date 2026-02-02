@@ -80,3 +80,10 @@ logs
 *.njsproj
 *.sln
 *.sw?
+
+
+google-services.json
+greater-works-city-churc-4a673-firebase-adminsdk-*.json
+*-firebase-adminsdk-*.json
+/ios
+/android

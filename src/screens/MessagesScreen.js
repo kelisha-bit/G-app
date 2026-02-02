@@ -29,6 +29,7 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { sendMessageNotification } from '../utils/notificationHelpers';
 
 export default function MessagesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -285,7 +286,7 @@ export default function MessagesScreen({ navigation }) {
       }
 
       // Create message
-      await addDoc(collection(db, 'messages'), {
+      const docRef = await addDoc(collection(db, 'messages'), {
         fromUserId: user.uid,
         fromUserName: userData?.displayName || user.displayName || 'Admin',
         fromUserEmail: user.email,
@@ -296,6 +297,21 @@ export default function MessagesScreen({ navigation }) {
         read: false,
         createdAt: new Date().toISOString(),
       });
+
+      // Send push notification to recipient (respects user preferences)
+      try {
+        const messageData = {
+          id: docRef.id,
+          subject: composeSubject.trim(),
+          fromUserName: userData?.displayName || user.displayName || 'Someone',
+        };
+        await sendMessageNotification(messageData, targetUser.id);
+      } catch (notifError) {
+        if (__DEV__) {
+          console.error('Error sending message notification:', notifError);
+        }
+        // Don't fail message sending if notification fails
+      }
 
       Alert.alert('Success', 'Message sent successfully', [
         {
@@ -342,14 +358,12 @@ export default function MessagesScreen({ navigation }) {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Messages</Text>
-        {isAdmin && (
-          <TouchableOpacity
-            style={styles.composeButton}
-            onPress={() => setComposeModalVisible(true)}
-          >
-            <Ionicons name="create-outline" size={24} color="#fff" />
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={styles.composeButton}
+          onPress={() => setComposeModalVisible(true)}
+        >
+          <Ionicons name="create-outline" size={24} color="#fff" />
+        </TouchableOpacity>
       </LinearGradient>
 
       <View style={styles.tabsContainer}>

@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Linking,
   Alert,
+  RefreshControl,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -22,6 +24,7 @@ import { isOnline } from '../utils/networkService';
 import { fetchBibleVerse } from '../utils/bibleApi';
 import OfflineIndicator from '../components/OfflineIndicator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isValidImageUrl } from '../utils/imageUtils';
 
 const { width } = Dimensions.get('window');
 
@@ -57,6 +60,17 @@ export default function HomeScreen({ navigation }) {
   const [bannerImageUrl, setBannerImageUrl] = useState(null);
   const [bannerMediaType, setBannerMediaType] = useState('image'); // 'image' or 'video'
   const [bannerLoading, setBannerLoading] = useState(true);
+  const [bannerImageError, setBannerImageError] = useState(false);
+  const [isLiveStreamActive, setIsLiveStreamActive] = useState(false);
+  const [liveStream, setLiveStream] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Debug: Log notification count changes in dev mode
+  useEffect(() => {
+    if (__DEV__ && totalNotificationCount > 0) {
+      console.log('Notification count updated:', totalNotificationCount);
+    }
+  }, [totalNotificationCount]);
 
   useEffect(() => {
     loadUserName();
@@ -65,6 +79,7 @@ export default function HomeScreen({ navigation }) {
     loadLatestSermon();
     loadVerseOfTheDay();
     loadBannerImage();
+    loadLiveStream();
     
     // Set up real-time listener for unread messages
     if (auth.currentUser) {
@@ -73,17 +88,75 @@ export default function HomeScreen({ navigation }) {
         where('toUserId', '==', auth.currentUser.uid)
       );
       
-      const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
-        const unreadCount = snapshot.docs.filter(doc => !doc.data().read).length;
-        setUnreadMessagesCount(unreadCount);
-        setTotalNotificationCount(unreadCount);
-      }, (error) => {
-        console.error('Error listening to messages:', error);
-      });
+      const unsubscribe = onSnapshot(
+        messagesQuery, 
+        (snapshot) => {
+          const unreadCount = snapshot.docs.filter(doc => !doc.data().read).length;
+          setUnreadMessagesCount(unreadCount);
+          setTotalNotificationCount(unreadCount);
+        }, 
+        (error) => {
+          // Only log permission errors in dev mode, handle gracefully
+          if (__DEV__) {
+            console.error('Error listening to messages:', error);
+          }
+          // Set count to 0 on error to prevent UI issues
+          setUnreadMessagesCount(0);
+          setTotalNotificationCount(0);
+        }
+      );
 
       return () => unsubscribe();
     }
   }, []);
+
+  // Set up real-time listener for live stream
+  useEffect(() => {
+    const liveStreamQuery = query(
+      collection(db, 'liveStreams'),
+      where('isLive', '==', true),
+      orderBy('startTime', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(liveStreamQuery, (snapshot) => {
+      if (!snapshot.empty) {
+        const stream = snapshot.docs[0].data();
+        setLiveStream({ id: snapshot.docs[0].id, ...stream });
+        setIsLiveStreamActive(true);
+      } else {
+        setLiveStream(null);
+        setIsLiveStreamActive(false);
+      }
+    }, (error) => {
+      if (__DEV__) console.error('Error listening to live stream:', error);
+      setIsLiveStreamActive(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const loadLiveStream = async () => {
+    try {
+      const q = query(
+        collection(db, 'liveStreams'),
+        where('isLive', '==', true),
+        orderBy('startTime', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const stream = querySnapshot.docs[0].data();
+        setLiveStream({ id: querySnapshot.docs[0].id, ...stream });
+        setIsLiveStreamActive(true);
+      } else {
+        setLiveStream(null);
+        setIsLiveStreamActive(false);
+      }
+    } catch (error) {
+      if (__DEV__) console.error('Error loading live stream:', error);
+      setIsLiveStreamActive(false);
+    }
+  };
 
   // Set up real-time listener for banner media changes
   useEffect(() => {
@@ -91,15 +164,24 @@ export default function HomeScreen({ navigation }) {
     const unsubscribe = onSnapshot(settingsDocRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        setBannerImageUrl(data.imageUrl || null);
+        const newImageUrl = data.imageUrl || null;
+        // Validate image URL, especially important for iOS web
+        if (newImageUrl && isValidImageUrl(newImageUrl)) {
+          setBannerImageUrl(newImageUrl);
+          setBannerImageError(false);
+        } else {
+          setBannerImageUrl(null);
+          setBannerImageError(false);
+        }
         setBannerMediaType(data.mediaType || 'image');
       } else {
         setBannerImageUrl(null);
         setBannerMediaType('image');
+        setBannerImageError(false);
       }
       setBannerLoading(false);
     }, (error) => {
-      console.error('Error listening to banner media:', error);
+      if (__DEV__) console.error('Error listening to banner media:', error);
       setBannerLoading(false);
     });
 
@@ -109,24 +191,36 @@ export default function HomeScreen({ navigation }) {
   const loadBannerImage = async () => {
     try {
       setBannerLoading(true);
+      setBannerImageError(false);
       const settingsDoc = await getDoc(doc(db, 'settings', 'homeBanner'));
       if (settingsDoc.exists()) {
         const data = settingsDoc.data();
-        setBannerImageUrl(data.imageUrl || null);
+        const newImageUrl = data.imageUrl || null;
+        // Validate image URL, especially important for iOS web
+        if (newImageUrl && isValidImageUrl(newImageUrl)) {
+          setBannerImageUrl(newImageUrl);
+          setBannerImageError(false);
+        } else {
+          setBannerImageUrl(null);
+          setBannerImageError(false);
+        }
         setBannerMediaType(data.mediaType || 'image');
       } else {
         setBannerImageUrl(null);
         setBannerMediaType('image');
+        setBannerImageError(false);
       }
     } catch (error) {
-      console.error('Error loading banner media:', error);
+      if (__DEV__) console.error('Error loading banner media:', error);
       // If permission error, just set to null (user might not have read access)
       if (error.code === 'permission-denied') {
         setBannerImageUrl(null);
         setBannerMediaType('image');
+        setBannerImageError(false);
       } else {
         setBannerImageUrl(null);
         setBannerMediaType('image');
+        setBannerImageError(false);
       }
     } finally {
       setBannerLoading(false);
@@ -143,7 +237,7 @@ export default function HomeScreen({ navigation }) {
           setUserName(auth.currentUser.displayName || 'Member');
         }
       } catch (error) {
-        console.error('Error loading user name:', error);
+        if (__DEV__) console.error('Error loading user name:', error);
         setUserName(auth.currentUser.displayName || 'Member');
       }
     }
@@ -164,7 +258,7 @@ export default function HomeScreen({ navigation }) {
       setUnreadMessagesCount(unreadCount);
       setTotalNotificationCount(unreadCount);
     } catch (error) {
-      console.error('Error loading notification counts:', error);
+      if (__DEV__) console.error('Error loading notification counts:', error);
     }
   };
 
@@ -188,7 +282,7 @@ export default function HomeScreen({ navigation }) {
         setLatestSermon(null);
       }
     } catch (error) {
-      console.error('Error loading latest sermon:', error);
+      if (__DEV__) console.error('Error loading latest sermon:', error);
       setLatestSermon(null);
     } finally {
       setSermonLoading(false);
@@ -219,7 +313,7 @@ export default function HomeScreen({ navigation }) {
         setVerseOfTheDay(result);
       }
     } catch (error) {
-      console.error('Error loading verse of the day:', error);
+      if (__DEV__) console.error('Error loading verse of the day:', error);
     } finally {
       setVerseLoading(false);
     }
@@ -231,25 +325,8 @@ export default function HomeScreen({ navigation }) {
       return;
     }
 
-    // Try video first, then audio
-    const url = latestSermon.videoUrl || latestSermon.audioUrl;
-    
-    if (url) {
-      try {
-        const supported = await Linking.canOpenURL(url);
-        if (supported) {
-          await Linking.openURL(url);
-        } else {
-          Alert.alert('Error', 'Cannot open this URL');
-        }
-      } catch (error) {
-        console.error('Error opening URL:', error);
-        Alert.alert('Error', 'Failed to open sermon');
-      }
-    } else {
-      // No media URL, navigate to sermons screen
-      navigation.navigate('Sermons');
-    }
+    // Navigate to sermon player screen
+    navigation.navigate('SermonPlayer', { sermon: latestSermon });
   };
 
   const loadUpcomingEvents = async () => {
@@ -276,7 +353,7 @@ export default function HomeScreen({ navigation }) {
             querySnapshot = await getDocs(eventsQuery);
           } catch (orderByError) {
             // Fallback: get all events and filter/sort in memory
-            console.log('OrderBy query failed, using fallback:', orderByError);
+            if (__DEV__) console.log('OrderBy query failed, using fallback:', orderByError);
             const allEventsQuery = query(collection(db, 'events'));
             querySnapshot = await getDocs(allEventsQuery);
           }
@@ -292,7 +369,7 @@ export default function HomeScreen({ navigation }) {
           // Cache the events for offline use
           await cacheEvents(events);
         } catch (error) {
-          console.error('Error loading events from Firebase:', error);
+          if (__DEV__) console.error('Error loading events from Firebase:', error);
           // Fall back to cached data
           const cachedEvents = await getCachedEvents(true); // Allow expired cache
           if (cachedEvents) {
@@ -301,7 +378,7 @@ export default function HomeScreen({ navigation }) {
         }
       } else {
         // Offline: Load from cache
-        console.log('Offline: Loading events from cache');
+        if (__DEV__) console.log('Offline: Loading events from cache');
         const cachedEvents = await getCachedEvents(true); // Allow expired cache
         if (cachedEvents) {
           events = cachedEvents;
@@ -338,7 +415,7 @@ export default function HomeScreen({ navigation }) {
       // Limit to 3 for display
       setUpcomingEvents(upcomingEvents.slice(0, 3));
     } catch (error) {
-      console.error('Error loading upcoming events:', error);
+      if (__DEV__) console.error('Error loading upcoming events:', error);
       // Try to load from cache as last resort
       try {
         const cachedEvents = await getCachedEvents(true);
@@ -377,6 +454,25 @@ export default function HomeScreen({ navigation }) {
       }
     } finally {
       setEventsLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadUserName(),
+        loadNotificationCounts(),
+        loadUpcomingEvents(),
+        loadLatestSermon(),
+        loadVerseOfTheDay(),
+        loadBannerImage(),
+        loadLiveStream(),
+      ]);
+    } catch (error) {
+      if (__DEV__) console.error('Error refreshing home screen:', error);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -443,7 +539,6 @@ export default function HomeScreen({ navigation }) {
   };
 
   const quickActions = [
-    { id: 1, title: 'Check In', icon: 'checkbox-outline', color: '#10b981', screen: 'CheckIn' },
     { id: 2, title: 'Events', icon: 'calendar', color: '#f59e0b', screen: 'Events' },
     { id: 3, title: 'Calendar', icon: 'calendar-outline', color: '#6366f1', screen: 'ChurchCalendar' },
     { id: 4, title: 'Bible', icon: 'book-outline', color: '#6366f1', screen: 'Bible' },
@@ -457,6 +552,12 @@ export default function HomeScreen({ navigation }) {
     { id: 12, title: 'Volunteer', icon: 'hand-right', color: '#f59e0b', screen: 'Volunteer' },
     { id: 13, title: 'Messages', icon: 'chatbubbles', color: '#6366f1', screen: 'Messages' },
     { id: 14, title: 'Resources', icon: 'library', color: '#f59e0b', screen: 'Resources' },
+    { id: 15, title: 'Live Stream', icon: 'videocam', color: '#ef4444', screen: 'LiveStreaming' },
+    { id: 16, title: 'Community', icon: 'people-circle-outline', color: '#10b981', screen: 'CommunityFeed' },
+    { id: 18, title: 'Testimonies', icon: 'star', color: '#f59e0b', screen: 'Testimonies' },
+    { id: 19, title: 'News', icon: 'newspaper', color: '#6366f1', screen: 'News' },
+    { id: 20, title: 'Prayer Journal', icon: 'bookmark', color: '#8b5cf6', screen: 'PrayerJournal' },
+    { id: 17, title: 'Goals', icon: 'flag', color: '#f59e0b', screen: 'GoalsChallenges' },
   ];
 
   return (
@@ -464,6 +565,14 @@ export default function HomeScreen({ navigation }) {
       style={styles.container} 
       contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 30, 50) }}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          colors={['#6366f1']}
+          tintColor="#6366f1"
+        />
+      }
     >
       {/* Offline Indicator */}
       <OfflineIndicator />
@@ -482,8 +591,8 @@ export default function HomeScreen({ navigation }) {
             <Ionicons name="notifications-outline" size={24} color="#fff" />
             {totalNotificationCount > 0 && (
               <View style={styles.notificationBadge}>
-                <Text style={styles.badgeText}>
-                  {totalNotificationCount > 99 ? '99+' : totalNotificationCount}
+                <Text style={styles.badgeText} numberOfLines={1} adjustsFontSizeToFit>
+                  {totalNotificationCount > 99 ? '99+' : totalNotificationCount.toString()}
                 </Text>
               </View>
             )}
@@ -497,7 +606,7 @@ export default function HomeScreen({ navigation }) {
           <View style={[styles.banner, styles.bannerPlaceholder]}>
             <ActivityIndicator size="large" color="#fff" />
           </View>
-        ) : bannerImageUrl ? (
+        ) : bannerImageUrl && !bannerImageError ? (
           bannerMediaType === 'video' ? (
             <BannerVideoPlayer uri={bannerImageUrl} style={styles.bannerImage} />
           ) : (
@@ -505,6 +614,13 @@ export default function HomeScreen({ navigation }) {
               source={{ uri: bannerImageUrl }} 
               style={styles.bannerImage}
               resizeMode="cover"
+              onError={(error) => {
+                if (__DEV__) console.error('Banner image load error:', error);
+                setBannerImageError(true);
+              }}
+              onLoadStart={() => {
+                setBannerImageError(false);
+              }}
             />
           )
         ) : (
@@ -531,6 +647,41 @@ export default function HomeScreen({ navigation }) {
         )}
       </View>
 
+      {/* Live Stream Button */}
+      {isLiveStreamActive && liveStream && (
+        <TouchableOpacity
+          style={styles.liveStreamButton}
+          onPress={() => navigation.navigate('LiveStreaming')}
+          activeOpacity={0.8}
+        >
+          <LinearGradient
+            colors={['#ef4444', '#dc2626']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.liveStreamGradient}
+          >
+            <View style={styles.liveStreamContent}>
+              <View style={styles.liveStreamLeft}>
+                <View style={styles.liveDotContainer}>
+                  <View style={styles.livePulseDot} />
+                  <View style={styles.liveDot} />
+                </View>
+                <View style={styles.liveStreamTextContainer}>
+                  <Text style={styles.liveStreamTitle}>LIVE NOW</Text>
+                  <Text style={styles.liveStreamSubtitle} numberOfLines={1}>
+                    {liveStream.title || 'Live Service'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.liveStreamRight}>
+                <Ionicons name="play-circle" size={32} color="#fff" />
+                <Text style={styles.watchNowText}>Watch</Text>
+              </View>
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
+
       {/* Verse of the Day */}
       {verseOfTheDay && (
         <TouchableOpacity
@@ -552,6 +703,33 @@ export default function HomeScreen({ navigation }) {
           </View>
         </TouchableOpacity>
       )}
+
+      {/* Prominent Check In Button */}
+      <View style={styles.checkInSection}>
+        <TouchableOpacity
+          style={styles.checkInButton}
+          onPress={() => navigation.navigate('CheckIn')}
+          activeOpacity={0.9}
+        >
+          <LinearGradient
+            colors={['#10b981', '#059669']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.checkInGradient}
+          >
+            <View style={styles.checkInContent}>
+              <View style={styles.checkInIconContainer}>
+                <Ionicons name="checkbox" size={40} color="#fff" />
+              </View>
+              <View style={styles.checkInTextContainer}>
+                <Text style={styles.checkInTitle}>Check In</Text>
+                <Text style={styles.checkInSubtitle}>Let us know you're here</Text>
+              </View>
+              <Ionicons name="arrow-forward-circle" size={32} color="#fff" />
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
 
       {/* Quick Actions */}
       <View style={styles.section}>
@@ -692,10 +870,16 @@ export default function HomeScreen({ navigation }) {
             onPress={handleSermonPress}
             activeOpacity={0.8}
           >
-            <Image
-              source={{ uri: latestSermon.image || 'https://via.placeholder.com/400x200' }}
-              style={styles.sermonImage}
-            />
+            {latestSermon.image ? (
+              <Image
+                source={{ uri: latestSermon.image }}
+                style={styles.sermonImage}
+              />
+            ) : (
+              <View style={[styles.sermonImage, { backgroundColor: '#6366f1', justifyContent: 'center', alignItems: 'center' }]}>
+                <Ionicons name="play-circle" size={48} color="#fff" />
+              </View>
+            )}
             <View style={styles.sermonOverlay}>
               <View style={styles.playButton}>
                 <Ionicons 
@@ -770,23 +954,36 @@ const styles = StyleSheet.create({
   },
   notificationButton: {
     position: 'relative',
+    padding: 4, // Add padding to ensure badge is not cut off
+    overflow: 'visible', // Ensure badge is visible even if it extends beyond button
   },
   notificationBadge: {
     position: 'absolute',
-    top: -5,
-    right: -5,
+    top: -2,
+    right: -2,
     backgroundColor: '#ef4444',
-    borderRadius: 10,
+    borderRadius: 12,
     minWidth: 20,
     height: 20,
     paddingHorizontal: 6,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 10, // Ensure badge appears above other elements
+    borderWidth: 2,
+    borderColor: '#fff', // Add border for better visibility
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5, // For Android
   },
   badgeText: {
     color: '#fff',
     fontSize: 11,
     fontWeight: 'bold',
+    textAlign: 'center',
+    lineHeight: 16, // Ensure text is vertically centered
+    includeFontPadding: false, // Remove extra padding on Android
   },
   quickActionBadge: {
     position: 'absolute',
@@ -832,6 +1029,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 5,
+    backgroundColor: '#e5e7eb', // Fallback background color for iOS web
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover',
+      display: 'block',
+    }),
   },
   bannerPlaceholder: {
     backgroundColor: '#e5e7eb',
@@ -1197,6 +1399,124 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
     paddingHorizontal: 20,
+  },
+  liveStreamButton: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  liveStreamGradient: {
+    padding: 16,
+  },
+  liveStreamContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  liveStreamLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  liveDotContainer: {
+    position: 'relative',
+    width: 24,
+    height: 24,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  livePulseDot: {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    opacity: 0.6,
+  },
+  liveDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#fff',
+    zIndex: 1,
+  },
+  liveStreamTextContainer: {
+    flex: 1,
+  },
+  liveStreamTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  liveStreamSubtitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  liveStreamRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  watchNowText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  checkInSection: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 0,
+  },
+  checkInButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  checkInGradient: {
+    padding: 20,
+  },
+  checkInContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  checkInIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  checkInTextContainer: {
+    flex: 1,
+  },
+  checkInTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  checkInSubtitle: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.9,
   },
 });
 

@@ -152,20 +152,20 @@ Write-Host ""
 if ($failCount -eq 0) {
     Write-Host "✅ All EAS secrets created successfully!" -ForegroundColor Green
     Write-Host ""
-    Write-Host "📝 Next steps:" -ForegroundColor Cyan
-    Write-Host "   1. Build your app: npm run build:android" -ForegroundColor White
-    Write-Host "   2. Or build iOS: npm run build:ios" -ForegroundColor White
-    Write-Host "   3. View secrets: eas secret:list" -ForegroundColor White
-    Write-Host ""
+    Write-Host '📝 Next steps:' -ForegroundColor Cyan
+    Write-Host '   1. Build your app: npm run build:android' -ForegroundColor White
+    Write-Host '   2. Or build iOS: npm run build:ios' -ForegroundColor White
+    Write-Host '   3. View secrets: eas secret:list' -ForegroundColor White
+    Write-Host ''
 } else {
-    Write-Host "⚠️  Some secrets failed to create." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "You can manually create secrets using:" -ForegroundColor Cyan
-    Write-Host "   eas secret:create --scope project --name EXPO_PUBLIC_FIREBASE_API_KEY --value YOUR_VALUE" -ForegroundColor White
-    Write-Host ""
+    Write-Host '⚠️  Some secrets failed to create.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host 'You can manually create secrets using:' -ForegroundColor Cyan
+    Write-Host '   eas secret:create --scope project --name EXPO_PUBLIC_FIREBASE_API_KEY --value YOUR_VALUE' -ForegroundColor White
+    Write-Host ''
 }
 
-Write-Host "View all secrets:" -ForegroundColor Cyan
-Write-Host "   eas secret:list" -ForegroundColor White
-Write-Host ""
+Write-Host 'View all secrets:' -ForegroundColor Cyan
+Write-Host '   eas secret:list' -ForegroundColor White
+Write-Host ''
 

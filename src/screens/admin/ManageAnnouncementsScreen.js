@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  Switch,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,11 +24,13 @@ import {
   query,
   orderBy,
 } from 'firebase/firestore';
-import { sendAnnouncementNotification } from '../../utils/notificationHelpers';
+import { sendAnnouncementNotification } from '../../utils/sendPushNotification';
+import { generateAnnouncementContent } from '../../utils/aiService';
 
 export default function ManageAnnouncementsScreen({ navigation }) {
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
@@ -37,6 +40,8 @@ export default function ManageAnnouncementsScreen({ navigation }) {
   const [message, setMessage] = useState('');
   const [priority, setPriority] = useState('medium');
   const [category, setCategory] = useState('General');
+  const [sendNotification, setSendNotification] = useState(true);
+  const [generatingContent, setGeneratingContent] = useState(false);
 
   const priorities = ['low', 'medium', 'high'];
   const categories = ['General', 'Event', 'Urgent', 'Update', 'Prayer', 'Reminder'];
@@ -78,6 +83,7 @@ export default function ManageAnnouncementsScreen({ navigation }) {
     setMessage(announcement.message || '');
     setPriority(announcement.priority || 'medium');
     setCategory(announcement.category || 'General');
+    setSendNotification(false); // Don't send notification on edit by default
     setModalVisible(true);
   };
 
@@ -86,6 +92,7 @@ export default function ManageAnnouncementsScreen({ navigation }) {
     setMessage('');
     setPriority('medium');
     setCategory('General');
+    setSendNotification(true);
     setSelectedAnnouncement(null);
   };
 
@@ -94,6 +101,8 @@ export default function ManageAnnouncementsScreen({ navigation }) {
       Alert.alert('Validation Error', 'Please fill in all required fields');
       return;
     }
+
+    setSaving(true);
 
     try {
       const announcementData = {
@@ -105,23 +114,67 @@ export default function ManageAnnouncementsScreen({ navigation }) {
       };
 
       if (editMode && selectedAnnouncement) {
+        // Update existing announcement
         await updateDoc(doc(db, 'announcements', selectedAnnouncement.id), announcementData);
-        Alert.alert('Success', 'Announcement updated successfully');
+        
+        // Optionally send notification for updates too
+        if (sendNotification) {
+          const announcement = {
+            id: selectedAnnouncement.id,
+            ...announcementData,
+          };
+          const result = await sendAnnouncementNotification(announcement);
+          
+          if (result.success) {
+            Alert.alert(
+              '✅ Updated & Notified',
+              `Announcement updated!\n\n📱 Notification sent to ${result.sent} of ${result.tokenCount} devices.`
+            );
+          } else {
+            Alert.alert(
+              '⚠️ Updated',
+              `Announcement updated but notification failed:\n${result.error || 'Unknown error'}`
+            );
+          }
+        } else {
+          Alert.alert('✅ Success', 'Announcement updated successfully');
+        }
       } else {
+        // Create new announcement
         const docRef = await addDoc(collection(db, 'announcements'), {
           ...announcementData,
           createdAt: new Date().toISOString(),
           read: false,
         });
         
-        // Send push notification to all users
-        const announcement = {
-          id: docRef.id,
-          ...announcementData,
-        };
-        await sendAnnouncementNotification(announcement);
-        
-        Alert.alert('Success', 'Announcement created and sent successfully');
+        // Send push notification if enabled
+        if (sendNotification) {
+          const announcement = {
+            id: docRef.id,
+            ...announcementData,
+          };
+          
+          const result = await sendAnnouncementNotification(announcement);
+          
+          if (result.success) {
+            Alert.alert(
+              '✅ Success!',
+              `Announcement created and sent!\n\n📱 Notification delivered to ${result.sent} of ${result.tokenCount} devices.${result.errors > 0 ? `\n⚠️ ${result.errors} failed.` : ''}`
+            );
+          } else if (result.warning) {
+            Alert.alert(
+              '⚠️ Partial Success',
+              `Announcement created.\n\n${result.warning}`
+            );
+          } else {
+            Alert.alert(
+              '⚠️ Created Without Notification',
+              `Announcement saved but notification failed:\n\n${result.error || 'No devices registered for notifications.'}`
+            );
+          }
+        } else {
+          Alert.alert('✅ Success', 'Announcement created (notification not sent)');
+        }
       }
 
       setModalVisible(false);
@@ -129,7 +182,9 @@ export default function ManageAnnouncementsScreen({ navigation }) {
       loadAnnouncements();
     } catch (error) {
       console.error('Error saving announcement:', error);
-      Alert.alert('Error', 'Failed to save announcement');
+      Alert.alert('Error', 'Failed to save announcement: ' + error.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -150,6 +205,67 @@ export default function ManageAnnouncementsScreen({ navigation }) {
             } catch (error) {
               console.error('Error deleting announcement:', error);
               Alert.alert('Error', 'Failed to delete announcement');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleGenerateContent = async () => {
+    if (!title || !title.trim()) {
+      Alert.alert('Info', 'Please enter an announcement title first');
+      return;
+    }
+
+    try {
+      setGeneratingContent(true);
+      const result = await generateAnnouncementContent(title, category, priority);
+
+      if (result.error) {
+        Alert.alert('Info', result.error);
+      } else {
+        if (result.message) {
+          setMessage(result.message);
+          Alert.alert('Success', 'AI-generated announcement content added! Please review and edit as needed.');
+        }
+      }
+    } catch (error) {
+      console.error('Error generating content:', error);
+      Alert.alert('Info', 'AI content generation unavailable. Please write content manually.');
+    } finally {
+      setGeneratingContent(false);
+    }
+  };
+
+  const handleResendNotification = async (announcement) => {
+    Alert.alert(
+      'Resend Notification',
+      `Send push notification for "${announcement.title}" again?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const result = await sendAnnouncementNotification(announcement);
+              
+              if (result.success) {
+                Alert.alert(
+                  '✅ Sent!',
+                  `Notification sent to ${result.sent} of ${result.tokenCount} devices.`
+                );
+              } else {
+                Alert.alert(
+                  '❌ Failed',
+                  result.error || 'Failed to send notification'
+                );
+              }
+            } catch (error) {
+              Alert.alert('Error', error.message);
+            } finally {
+              setSaving(false);
             }
           },
         },
@@ -195,6 +311,12 @@ export default function ManageAnnouncementsScreen({ navigation }) {
           </View>
         </View>
         <View style={styles.announcementActions}>
+          <TouchableOpacity 
+            style={styles.resendButton} 
+            onPress={() => handleResendNotification(announcement)}
+          >
+            <Ionicons name="notifications-outline" size={20} color="#6366f1" />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.editButton} onPress={() => openEditModal(announcement)}>
             <Ionicons name="create-outline" size={20} color="#6366f1" />
           </TouchableOpacity>
@@ -222,6 +344,16 @@ export default function ManageAnnouncementsScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* Loading Overlay */}
+      {saving && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color="#6366f1" />
+            <Text style={styles.loadingOverlayText}>Sending notification...</Text>
+          </View>
+        </View>
+      )}
+
       <LinearGradient colors={['#6366f1', '#8b5cf6']} style={styles.header}>
         <View style={styles.headerTop}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -306,7 +438,23 @@ export default function ManageAnnouncementsScreen({ navigation }) {
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Message *</Text>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Message *</Text>
+                <TouchableOpacity
+                  style={[styles.aiGenerateButton, generatingContent && styles.aiGenerateButtonDisabled]}
+                  onPress={handleGenerateContent}
+                  disabled={generatingContent || !title.trim()}
+                >
+                  {generatingContent ? (
+                    <ActivityIndicator size="small" color="#6366f1" />
+                  ) : (
+                    <Ionicons name="sparkles" size={16} color="#6366f1" />
+                  )}
+                  <Text style={styles.aiGenerateButtonText}>
+                    {generatingContent ? 'Generating...' : 'AI Generate'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={message}
@@ -360,15 +508,51 @@ export default function ManageAnnouncementsScreen({ navigation }) {
               </ScrollView>
             </View>
 
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+            {/* Send Notification Toggle */}
+            <View style={styles.notificationToggle}>
+              <View style={styles.notificationToggleLeft}>
+                <Ionicons name="notifications" size={24} color="#6366f1" />
+                <View style={styles.notificationToggleText}>
+                  <Text style={styles.notificationToggleTitle}>Send Push Notification</Text>
+                  <Text style={styles.notificationToggleSubtitle}>
+                    Notify all church members
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={sendNotification}
+                onValueChange={setSendNotification}
+                trackColor={{ false: '#d1d5db', true: '#a5b4fc' }}
+                thumbColor={sendNotification ? '#6366f1' : '#9ca3af'}
+              />
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
+              onPress={handleSave}
+              disabled={saving}
+            >
               <LinearGradient
-                colors={['#6366f1', '#8b5cf6']}
+                colors={saving ? ['#9ca3af', '#9ca3af'] : ['#6366f1', '#8b5cf6']}
                 style={styles.saveButtonGradient}
               >
-                <Ionicons name="send" size={24} color="#fff" />
-                <Text style={styles.saveButtonText}>
-                  {editMode ? 'Update' : 'Send Announcement'}
-                </Text>
+                {saving ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons 
+                      name={sendNotification ? "send" : "save"} 
+                      size={24} 
+                      color="#fff" 
+                    />
+                    <Text style={styles.saveButtonText}>
+                      {editMode 
+                        ? (sendNotification ? 'Update & Notify' : 'Update') 
+                        : (sendNotification ? 'Send Announcement' : 'Save Without Notification')
+                      }
+                    </Text>
+                  </>
+                )}
               </LinearGradient>
             </TouchableOpacity>
 
@@ -384,6 +568,34 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingBox: {
+    backgroundColor: '#fff',
+    padding: 30,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  loadingOverlayText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: '#374151',
+    fontWeight: '600',
   },
   header: {
     paddingTop: 50,
@@ -527,9 +739,12 @@ const styles = StyleSheet.create({
   announcementActions: {
     flexDirection: 'row',
   },
+  resendButton: {
+    padding: 8,
+  },
   editButton: {
     padding: 8,
-    marginLeft: 8,
+    marginLeft: 4,
   },
   deleteButton: {
     padding: 8,
@@ -637,6 +852,35 @@ const styles = StyleSheet.create({
   categoryButtonTextActive: {
     color: '#fff',
   },
+  notificationToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  notificationToggleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  notificationToggleText: {
+    marginLeft: 12,
+  },
+  notificationToggleTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  notificationToggleSubtitle: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
   saveButton: {
     borderRadius: 12,
     overflow: 'hidden',
@@ -645,6 +889,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 5,
+  },
+  saveButtonDisabled: {
+    opacity: 0.7,
   },
   saveButtonGradient: {
     flexDirection: 'row',
@@ -658,8 +905,29 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginLeft: 10,
   },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  aiGenerateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ede9fe',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#c4b5fd',
+  },
+  aiGenerateButtonDisabled: {
+    opacity: 0.6,
+  },
+  aiGenerateButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6366f1',
+    marginLeft: 6,
+  },
 });
-
-
-
-

@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../../firebase.config';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import notificationService from '../utils/notificationService';
+import { runPushNotificationDiagnostics, printDiagnosticsReport } from '../utils/pushNotificationDiagnostics';
 
 export default function NotificationScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
@@ -27,6 +29,7 @@ export default function NotificationScreen({ navigation }) {
     weeklyDigest: false,
   });
   const [hasPermission, setHasPermission] = useState(false);
+  const [runningDiagnostics, setRunningDiagnostics] = useState(false);
 
   useEffect(() => {
     loadNotificationSettings();
@@ -76,15 +79,27 @@ export default function NotificationScreen({ navigation }) {
       }
       
       // Register for push notifications
-      const token = await notificationService.registerForPushNotifications();
-      if (token) {
+      const result = await notificationService.registerForPushNotifications();
+      if (result.success && result.token) {
         setHasPermission(true);
       } else {
-        Alert.alert(
-          'Error',
-          'Failed to register for push notifications. Please try again.',
-          [{ text: 'OK' }]
-        );
+        // Show detailed error message
+        const errorMessage = result.error || 'Failed to register for push notifications. Please try again.';
+        
+        // Check if it's the Expo Go error and provide helpful instructions
+        if (errorMessage.includes('Expo Go')) {
+          Alert.alert(
+            'Development Build Required',
+            errorMessage + '\n\nTo fix this:\n1. Build a development build: eas build --platform android --profile development\n2. Install the APK on your device\n3. Then enable push notifications again.',
+            [{ text: 'OK' }]
+          );
+        } else {
+          Alert.alert(
+            'Registration Failed',
+            errorMessage,
+            [{ text: 'OK' }]
+          );
+        }
         return;
       }
     }
@@ -221,6 +236,75 @@ export default function NotificationScreen({ navigation }) {
             You can always change these settings later. Disabling notifications won't affect important account-related messages.
           </Text>
         </View>
+
+        {/* Diagnostics Section */}
+        {__DEV__ && (
+          <TouchableOpacity
+            style={[styles.diagnosticsButton, runningDiagnostics && styles.diagnosticsButtonDisabled]}
+            onPress={async () => {
+              if (runningDiagnostics) return;
+              
+              setRunningDiagnostics(true);
+              try {
+                const diagnostics = await runPushNotificationDiagnostics();
+                printDiagnosticsReport(diagnostics);
+
+                // Show user-friendly alert with key findings
+                const criticalIssues = diagnostics.issues.filter(i => i.severity === 'error');
+                const warnings = diagnostics.warnings;
+
+                let message = '';
+                if (criticalIssues.length > 0) {
+                  message += `❌ Critical Issues Found:\n\n`;
+                  criticalIssues.slice(0, 3).forEach((issue, i) => {
+                    message += `${i + 1}. ${issue.message}\n`;
+                    if (issue.fix) {
+                      message += `   Fix: ${issue.fix.split('\n')[0]}\n`;
+                    }
+                    message += '\n';
+                  });
+                }
+
+                if (warnings.length > 0) {
+                  message += `⚠️ Warnings:\n\n`;
+                  warnings.slice(0, 2).forEach((warning, i) => {
+                    message += `${i + 1}. ${warning.message}\n`;
+                  });
+                  message += '\n';
+                }
+
+                if (criticalIssues.length === 0 && warnings.length === 0) {
+                  message = '✅ All diagnostic checks passed!\n\nIf notifications still don\'t work, check:\n• Backend service is running\n• Network connection\n• Battery saver mode is off';
+                } else {
+                  message += 'Check the console for full diagnostic details.';
+                }
+
+                Alert.alert(
+                  criticalIssues.length > 0 ? 'Push Notification Issues' : 'Diagnostics Complete',
+                  message,
+                  [{ text: 'OK' }]
+                );
+              } catch (error) {
+                console.error('Error running diagnostics:', error);
+                Alert.alert('Error', 'Failed to run diagnostics. Check console for details.');
+              } finally {
+                setRunningDiagnostics(false);
+              }
+            }}
+            disabled={runningDiagnostics}
+          >
+            <View style={styles.diagnosticsButtonContent}>
+              {runningDiagnostics ? (
+                <ActivityIndicator size="small" color="#fff" style={{ marginRight: 10 }} />
+              ) : (
+                <Ionicons name="bug-outline" size={20} color="#fff" style={{ marginRight: 10 }} />
+              )}
+              <Text style={styles.diagnosticsButtonText}>
+                {runningDiagnostics ? 'Running Diagnostics...' : 'Run Push Notification Diagnostics'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         <View style={{ height: 30 }} />
       </ScrollView>
@@ -360,6 +444,31 @@ const styles = StyleSheet.create({
     color: '#dc2626',
     marginLeft: 8,
     lineHeight: 16,
+  },
+  diagnosticsButton: {
+    backgroundColor: '#6366f1',
+    padding: 15,
+    borderRadius: 12,
+    marginTop: 20,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  diagnosticsButtonDisabled: {
+    opacity: 0.6,
+  },
+  diagnosticsButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diagnosticsButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
 

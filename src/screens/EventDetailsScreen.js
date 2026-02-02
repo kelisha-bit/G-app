@@ -8,6 +8,8 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Modal,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function EventDetailsScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
-  const { eventId } = route.params;
+  const { eventId } = route?.params || {};
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
@@ -29,6 +31,10 @@ export default function EventDetailsScreen({ route, navigation }) {
   const [loadingWeather, setLoadingWeather] = useState(false);
   const [registrations, setRegistrations] = useState([]);
   const [loadingRegistrations, setLoadingRegistrations] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     loadEventDetails();
@@ -73,6 +79,12 @@ export default function EventDetailsScreen({ route, navigation }) {
   const loadEventDetails = async () => {
     try {
       setLoading(true);
+      
+      if (!eventId) {
+        Alert.alert('Error', 'Event ID is missing');
+        navigation.goBack();
+        return;
+      }
       
       // Check if this is a recurring event instance (ID format: originalEventId_date)
       let actualEventId = eventId;
@@ -182,51 +194,73 @@ export default function EventDetailsScreen({ route, navigation }) {
 
   const handleRegister = async () => {
     if (!auth.currentUser) {
-      Alert.alert('Login Required', 'Please login to register for events');
+      if (Platform.OS === 'web') {
+        window.alert('Please login to register for events');
+      } else {
+        Alert.alert('Login Required', 'Please login to register for events');
+      }
       return;
     }
 
-    Alert.alert(
-      'Confirm Registration',
-      `Are you sure you want to register for ${event?.title}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Register',
-          onPress: async () => {
-            try {
-              setRegistering(true);
+    // Web-compatible confirmation
+    const confirmRegistration = async () => {
+      try {
+        setRegistering(true);
 
-              // Add registration to Firestore
-              await addDoc(collection(db, 'eventRegistrations'), {
-                eventId: event.id,
-                userId: auth.currentUser.uid,
-                userName: auth.currentUser.displayName || 'User',
-                userEmail: auth.currentUser.email,
-                registeredAt: new Date().toISOString(),
-              });
+        // Add registration to Firestore
+        await addDoc(collection(db, 'eventRegistrations'), {
+          eventId: event.id,
+          userId: auth.currentUser.uid,
+          userName: auth.currentUser.displayName || 'User',
+          userEmail: auth.currentUser.email,
+          registeredAt: new Date().toISOString(),
+        });
 
-              // Increment registration count
-              const eventRef = doc(db, 'events', event.id);
-              await updateDoc(eventRef, {
-                registrations: increment(1),
-              });
+        // Increment registration count
+        const eventRef = doc(db, 'events', event.id);
+        await updateDoc(eventRef, {
+          registrations: increment(1),
+        });
 
-              setIsRegistered(true);
-              Alert.alert('Success', 'You have been registered for this event!');
-              await loadEventDetails(); // Reload to get updated count
-              await loadRegistrations(); // Reload registrations list
-              await checkRegistrationStatus(); // Update registration status
-            } catch (error) {
-              console.error('Error registering:', error);
-              Alert.alert('Error', 'Failed to register. Please try again.');
-            } finally {
-              setRegistering(false);
-            }
+        setIsRegistered(true);
+        if (Platform.OS === 'web') {
+          window.alert('Success! You have been registered for this event!');
+        } else {
+          Alert.alert('Success', 'You have been registered for this event!');
+        }
+        await loadEventDetails(); // Reload to get updated count
+        await loadRegistrations(); // Reload registrations list
+        await checkRegistrationStatus(); // Update registration status
+      } catch (error) {
+        console.error('Error registering:', error);
+        if (Platform.OS === 'web') {
+          window.alert('Failed to register. Please try again.');
+        } else {
+          Alert.alert('Error', 'Failed to register. Please try again.');
+        }
+      } finally {
+        setRegistering(false);
+      }
+    };
+
+    // Platform-specific confirmation dialog
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Are you sure you want to register for ${event?.title}?`)) {
+        confirmRegistration();
+      }
+    } else {
+      Alert.alert(
+        'Confirm Registration',
+        `Are you sure you want to register for ${event?.title}?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Register',
+            onPress: confirmRegistration,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const getCategoryColor = (category) => {
@@ -308,7 +342,10 @@ export default function EventDetailsScreen({ route, navigation }) {
       } else {
         // Only set weather to null if it's not a configuration error
         // (configuration errors are expected and shouldn't show as failures)
-        if (!result.error.includes('API key not configured')) {
+        if (typeof result.error === 'string' && !result.error.includes('API key not configured')) {
+          setWeather(null);
+        } else if (typeof result.error !== 'string') {
+          // If error is not a string, set weather to null
           setWeather(null);
         }
       }
@@ -345,10 +382,16 @@ export default function EventDetailsScreen({ route, navigation }) {
     <View style={styles.container}>
       {/* Hero Image with Back Button */}
       <View style={styles.heroSection}>
-        <Image 
-          source={{ uri: event.image || 'https://via.placeholder.com/400x200' }} 
-          style={styles.heroImage}
-        />
+        {event.image ? (
+          <Image 
+            source={{ uri: event.image }} 
+            style={styles.heroImage}
+          />
+        ) : (
+          <View style={[styles.heroImage, { backgroundColor: '#6366f1', justifyContent: 'center', alignItems: 'center' }]}>
+            <Ionicons name="calendar" size={64} color="#fff" />
+          </View>
+        )}
         <LinearGradient
           colors={['rgba(0,0,0,0.6)', 'transparent']}
           style={styles.heroOverlay}
@@ -402,7 +445,7 @@ export default function EventDetailsScreen({ route, navigation }) {
           <View style={styles.infoCard}>
             <Ionicons name="people" size={24} color="#8b5cf6" />
             <Text style={styles.infoCardLabel}>Registered</Text>
-            <Text style={styles.infoCardValue}>{event.registrations || 0}</Text>
+            <Text style={styles.infoCardValue}>{registrations.length || 0}</Text>
           </View>
         </View>
 
@@ -548,7 +591,7 @@ export default function EventDetailsScreen({ route, navigation }) {
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
               <Ionicons name="people" size={32} color="#6366f1" />
-              <Text style={styles.statValue}>{event.registrations || 0}</Text>
+              <Text style={styles.statValue}>{registrations.length || 0}</Text>
               <Text style={styles.statLabel}>Registered</Text>
             </View>
             <View style={styles.statItem}>
@@ -620,10 +663,12 @@ export default function EventDetailsScreen({ route, navigation }) {
             style={styles.registerButton}
             onPress={handleRegister}
             disabled={registering}
+            activeOpacity={0.8}
           >
             <LinearGradient
               colors={['#6366f1', '#8b5cf6']}
               style={styles.registerButtonGradient}
+              pointerEvents="none"
             >
               {registering ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -818,10 +863,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 10,
+    zIndex: 1000,
+    ...(Platform.OS === 'web' && {
+      position: 'fixed',
+    }),
   },
   registerButton: {
     borderRadius: 15,
     overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+    }),
   },
   registerButtonGradient: {
     flexDirection: 'row',

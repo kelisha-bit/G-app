@@ -330,10 +330,10 @@ export default function FamilyMinistryScreen({ navigation, route }) {
 
       setResources(resourcesData);
     } catch (error) {
-      console.error('Error loading resources:', error);
+      if (__DEV__) console.error('Error loading resources:', error);
       // If permission error, use fallback resources
       if (error.code === 'permission-denied' || error.message?.includes('permission')) {
-        console.log('Permission denied - using fallback resources');
+        if (__DEV__) console.log('Permission denied - using fallback resources');
         setResources([
           {
             id: '1',

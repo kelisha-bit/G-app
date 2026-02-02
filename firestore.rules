@@ -21,12 +21,35 @@ service cloud.firestore {
     
     match /events/{eventId} {
       allow read: if true;
-      allow write: if isAdmin();
+      // Allow authenticated users to update the registrations field (for event registration)
+      // This allows increment operations when users register for events
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        // Allow if registrations field exists and is being incremented (new value >= old value)
+        (request.resource.data.registrations is int &&
+         (resource.data.registrations == null || 
+          request.resource.data.registrations >= resource.data.registrations))
+      );
+      // Only admins can create or delete events
+      allow create, delete: if isAdmin();
     }
     
     match /sermons/{sermonId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      // Allow authenticated users to update (for view count increment operations)
+      // App code ensures only views field is incremented
+      allow update: if request.auth != null;
+    }
+    
+    // Sermon Views - track which users viewed which sermons
+    match /sermonViews/{viewId} {
+      allow read: if request.auth != null; // Authenticated users can see who viewed sermons
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid; // Users can track their own views
+      allow update: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid; // Users can update their own view records
+      allow delete: if isAdmin(); // Only admins can delete view records
     }
     
     match /checkIns/{checkInId} {
@@ -107,18 +130,24 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && resource != null && resource.data.userId == request.auth.uid;
     }
     
+    match /devotionalLikes/{likeId} {
+      allow read: if request.auth != null && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource != null && resource.data.userId == request.auth.uid;
+    }
+    
     match /messages/{messageId} {
       // Allow read if user is authenticated and is the recipient, sender, or admin
+      // For queries: Firestore evaluates this for each document in the result set
+      // Since queries filter by toUserId, matching documents will pass the toUserId check
       allow read: if request.auth != null && (
         (resource != null && resource.data.toUserId == request.auth.uid) ||
         (resource != null && resource.data.fromUserId == request.auth.uid) ||
         isAdmin()
       );
-      // Allow create if user is the sender or admin
-      allow create: if request.auth != null && (
-        request.resource.data.fromUserId == request.auth.uid || 
-        isAdmin()
-      );
+      // Allow authenticated users to create messages (members and admins can send)
+      allow create: if request.auth != null && 
+                     request.resource.data.fromUserId == request.auth.uid;
       // Allow update if user is the recipient (to mark as read) or admin
       allow update: if request.auth != null && (
         (resource != null && resource.data.toUserId == request.auth.uid) || 
@@ -222,7 +251,22 @@ service cloud.firestore {
     // Courses - public read, admin write (users update their own progress via users collection)
     match /courses/{courseId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      // Allow authenticated users to update the enrolled field (for course enrollment)
+      // This allows increment operations when users enroll in courses
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        // Allow if enrolled field exists and is being incremented (new value >= old value)
+        (request.resource.data.enrolled is int &&
+         (resource.data.enrolled == null || 
+          request.resource.data.enrolled >= resource.data.enrolled))
+      );
+      
+      // Course Lessons - public read, admin write
+      match /lessons/{lessonId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
     }
     
     // Training Materials - public read, admin write
@@ -237,7 +281,15 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.authorId == request.auth.uid;
       allow update: if request.auth != null && (
         resource.data.authorId == request.auth.uid || 
-        isAdmin()
+        isAdmin() ||
+        // Allow authenticated users to increment likes field (for like functionality)
+        (request.resource.data.likes is int &&
+         (resource.data.likes == null || 
+          request.resource.data.likes >= resource.data.likes)) ||
+        // Allow authenticated users to increment replyCount field (for reply functionality)
+        (request.resource.data.replyCount is int &&
+         (resource.data.replyCount == null || 
+          request.resource.data.replyCount >= resource.data.replyCount))
       );
       allow delete: if request.auth != null && (
         resource.data.authorId == request.auth.uid || 
@@ -257,6 +309,223 @@ service cloud.firestore {
         isAdmin()
       );
       allow delete: if isAdmin();
+    }
+    
+    // Live Streams - public read, admin write
+    match /liveStreams/{streamId} {
+      allow read: if true; // Anyone can view live streams
+      allow write: if isAdmin(); // Only admins can create/update/delete streams
+      
+      // Chat messages during live stream
+      match /chat/{messageId} {
+        allow read: if request.auth != null; // Authenticated users can read chat
+        allow create: if request.auth != null && 
+          request.resource.data.userId == request.auth.uid; // Users can send their own messages
+        allow update, delete: if isAdmin(); // Only admins can modify/delete messages
+      }
+      
+      // Prayer requests during live stream
+      match /prayerRequests/{prayerId} {
+        allow read: if request.auth != null; // Authenticated users can read prayer requests
+        allow create: if request.auth != null && 
+          request.resource.data.userId == request.auth.uid; // Users can create their own prayer requests
+        allow update, delete: if isAdmin(); // Only admins can modify/delete
+      }
+      
+      // Notes during live stream - users can only access their own notes
+      match /notes/{noteId} {
+        allow read: if request.auth != null && (
+          resource == null || resource.data.userId == request.auth.uid
+        ); // Users can only read their own notes
+        allow create: if request.auth != null && 
+          request.resource.data.userId == request.auth.uid; // Users can create their own notes
+        allow update: if request.auth != null && 
+          resource != null && resource.data.userId == request.auth.uid; // Users can update their own notes
+        allow delete: if request.auth != null && 
+          resource != null && resource.data.userId == request.auth.uid; // Users can delete their own notes
+      }
+    }
+    
+    // Community Feed - authenticated users can read approved posts, create posts, and comment
+    match /communityFeed/{postId} {
+      // Allow read for authenticated users (app filters unapproved posts client-side)
+      // This allows queries to work properly while still maintaining security
+      allow read: if request.auth != null;
+      // Allow authenticated users to create posts
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      // Allow users to update their own posts, admins to update any post, or authenticated users to update commentsCount
+      allow update: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin() ||
+        // Allow authenticated users to update commentsCount field (for comment tracking)
+        (request.resource.data.commentsCount is int &&
+         (resource.data.commentsCount == null || 
+          request.resource.data.commentsCount >= resource.data.commentsCount))
+      );
+      // Allow users to delete their own posts, or admins to delete any post
+      allow delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
+      
+      // Comments on posts
+      match /comments/{commentId} {
+        // Allow authenticated users to read comments
+        allow read: if request.auth != null;
+        // Allow authenticated users to create comments
+        // Validate that userId matches the authenticated user
+        allow create: if request.auth != null && 
+          request.resource.data.userId == request.auth.uid;
+        // Users can update/delete their own comments, admins can do anything
+        allow update: if request.auth != null && (
+          (resource != null && resource.data.userId == request.auth.uid) || 
+          isAdmin()
+        );
+        allow delete: if request.auth != null && (
+          (resource != null && resource.data.userId == request.auth.uid) || 
+          isAdmin()
+        );
+      }
+    }
+    
+    // Testimonies - authenticated users can read approved testimonies, create testimonies, and comment
+    match /testimonies/{testimonyId} {
+      // Allow read for authenticated users (app filters unapproved testimonies client-side)
+      // This allows queries to work properly while still maintaining security
+      allow read: if request.auth != null;
+      // Allow authenticated users to create testimonies
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      // Allow users to update their own testimonies, admins to update any testimony, or authenticated users to update likes/commentsCount
+      allow update: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin() ||
+        // Allow authenticated users to update likesCount and commentsCount fields (for like/comment tracking)
+        (request.resource.data.likesCount is int &&
+         (resource.data.likesCount == null || 
+          request.resource.data.likesCount >= resource.data.likesCount)) ||
+        (request.resource.data.commentsCount is int &&
+         (resource.data.commentsCount == null || 
+          request.resource.data.commentsCount >= resource.data.commentsCount))
+      );
+      // Allow users to delete their own testimonies, or admins to delete any testimony
+      allow delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
+      
+      // Comments on testimonies
+      match /comments/{commentId} {
+        // Allow authenticated users to read comments
+        allow read: if request.auth != null;
+        // Allow authenticated users to create comments
+        // Validate that userId matches the authenticated user
+        allow create: if request.auth != null && 
+          request.resource.data.userId == request.auth.uid;
+        // Users can update/delete their own comments, admins can do anything
+        allow update: if request.auth != null && (
+          (resource != null && resource.data.userId == request.auth.uid) || 
+          isAdmin()
+        );
+        allow delete: if request.auth != null && (
+          (resource != null && resource.data.userId == request.auth.uid) || 
+          isAdmin()
+        );
+      }
+    }
+    
+    // User Challenges - users can only access their own challenges
+    match /userChallenges/{challengeId} {
+      // Allow read if user is authenticated and owns the document
+      // For queries, Firestore checks each document - this allows documents where userId matches
+      allow read: if request.auth != null && (
+        resource == null || 
+        resource.data.userId == request.auth.uid
+      );
+      // Allow create if user is authenticated and sets their own userId
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      // Allow update if user owns the document
+      allow update: if request.auth != null && (
+        resource != null && 
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid
+      );
+      // Allow delete if user owns the document
+      allow delete: if request.auth != null && (
+        resource != null && 
+        resource.data.userId == request.auth.uid
+      );
+    }
+    
+    // User Goals - users can only access their own goals
+    match /userGoals/{goalId} {
+      // Allow read if user is authenticated and owns the document
+      // For queries, Firestore checks each document - this allows documents where userId matches
+      allow read: if request.auth != null && (
+        resource == null || 
+        resource.data.userId == request.auth.uid
+      );
+      // Allow create if user is authenticated and sets their own userId
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      // Allow update if user owns the document
+      allow update: if request.auth != null && (
+        resource != null && 
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid
+      );
+      // Allow delete if user owns the document
+      allow delete: if request.auth != null && (
+        resource != null && 
+        resource.data.userId == request.auth.uid
+      );
+    }
+    
+    // Church Staff - public read, admin write
+    match /churchStaff/{staffId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Service Leaders Roster - public read, admin write
+    match /serviceLeaders/{rosterId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // News Articles - public read for published articles, admin write
+    match /newsArticles/{articleId} {
+      // Allow read for published articles (isPublished !== false)
+      // App filters unpublished articles client-side for non-admins
+      allow read: if true;
+      // Only admins can create, update, or delete articles
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Prayer Journal - users can only access their own entries (private by default)
+    match /prayerJournal/{prayerId} {
+      // Users can only read their own prayer entries
+      // For queries: Firestore checks each document - this allows documents where userId matches
+      allow read: if request.auth != null && (
+        resource == null || 
+        resource.data.userId == request.auth.uid
+      );
+      // Users can create their own prayer entries
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      // Users can update their own prayer entries
+      allow update: if request.auth != null && (
+        resource != null && 
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid
+      );
+      // Users can delete their own prayer entries
+      allow delete: if request.auth != null && (
+        resource != null && 
+        resource.data.userId == request.auth.uid
+      );
     }
   }
 }

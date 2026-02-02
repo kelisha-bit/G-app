@@ -120,57 +120,79 @@ User documents store:
 - `notificationSettings`: User preferences object
 - `lastTokenUpdate`: Timestamp of last token update
 
-## 🔧 Backend Integration (Required for Production)
+## 🔧 Backend Integration
 
-### Current Status
-The notification helpers prepare notification data but require a backend service to actually send push notifications via Expo Push Notification Service.
+### ✅ Status: COMPLETE
 
-### What You Need
+The backend service has been created and notification helpers have been updated to use it.
 
-1. **Backend Service** (Node.js/Express recommended)
-   - Endpoint to receive notification requests
-   - Use Expo Push API to send notifications
-   - Handle token validation and cleanup
+### Backend Service Setup
 
-2. **Expo Push API Integration**
-   ```javascript
-   // Example backend endpoint
-   const { Expo } = require('expo-server-sdk');
-   const expo = new Expo();
-
-   async function sendPushNotification(tokens, title, body, data) {
-     const messages = tokens.map(token => ({
-       to: token,
-       sound: 'default',
-       title,
-       body,
-       data,
-     }));
-
-     const chunks = expo.chunkPushNotifications(messages);
-     for (let chunk of chunks) {
-       await expo.sendPushNotificationsAsync(chunk);
-     }
-   }
+1. **Install Dependencies**
+   ```bash
+   cd backend
+   npm install
    ```
 
-3. **Update Notification Helpers**
-   - Replace console.log statements with actual API calls to your backend
-   - Backend will handle sending via Expo Push API
+2. **Configure Environment**
+   - Copy `.env.example` to `.env` (if not already done)
+   - Set `PORT` (default: 3001)
+   - Set `NODE_ENV` (development/production)
+
+3. **Start the Server**
+   ```bash
+   npm start
+   # Or for development with auto-reload:
+   npm run dev
+   ```
+
+4. **Configure Mobile App**
+   - Add to your `.env` file:
+     ```
+     EXPO_PUBLIC_NOTIFICATION_BACKEND_URL=http://localhost:3001
+     ```
+   - For production, set to your deployed backend URL (e.g., `https://your-backend.herokuapp.com`)
+
+### Backend API Endpoints
+
+- **POST `/api/notifications/send`**: Send notifications to specified tokens
+- **POST `/api/notifications/broadcast`**: Broadcast to multiple devices
+- **GET `/api/health`**: Health check endpoint
+
+See `backend/README.md` for complete API documentation.
+
+### How It Works
+
+1. Mobile app calls notification helper functions (e.g., `sendAnnouncementNotification()`)
+2. Helper functions collect push tokens from Firebase
+3. Helper functions make HTTP request to backend API
+4. Backend uses `expo-server-sdk` to send notifications via Expo Push Notification Service
+5. Results are returned to the mobile app
+
+### Fallback Behavior
+
+- If backend is unavailable, the app falls back to local notifications in development mode
+- This ensures notifications still work during development even without the backend running
 
 ## 🧪 Testing
 
 ### Local Testing
-- Notifications work immediately for local notifications
+- **⚠️ IMPORTANT**: Android push notifications require a development build (Expo Go doesn't support them in SDK 53+)
+- Local notifications work immediately for local notifications
 - Test event reminders by viewing upcoming events
 - Check notification settings screen for permission status
 
 ### Production Testing
-1. Build the app with EAS Build
+1. **Build a development build** with EAS Build (required for Android push notifications):
+   ```bash
+   eas build --platform android --profile development
+   ```
 2. Install on physical device (notifications don't work in simulator)
 3. Test notification permissions
 4. Test event reminders
 5. Test notification taps and navigation
+
+**Note**: See `PUSH_NOTIFICATIONS_NEXT_STEPS.md` for detailed testing instructions with development builds.
 
 ## 📋 Notification Types
 
@@ -234,7 +256,13 @@ The notification helpers prepare notification data but require a backend service
    - Push notifications don't work in simulators/emulators
    - Must test on physical device
 
-5. **Check Expo Project ID**
+5. **Expo Go Limitation (SDK 53+)**
+   - **Android push notifications DO NOT work in Expo Go** starting with SDK 53
+   - You **MUST** use a development build or production build for Android
+   - iOS: Expo Go still works, but development builds are recommended
+   - See `PUSH_NOTIFICATIONS_NEXT_STEPS.md` for development build instructions
+
+6. **Check Expo Project ID**
    - Ensure project ID in `notificationService.js` matches `app.json`
 
 ### Event Reminders Not Scheduling
@@ -248,15 +276,16 @@ The notification helpers prepare notification data but require a backend service
 
 ### To Complete Production Setup:
 
-1. **Create Backend Service**
-   - Set up Node.js/Express server
-   - Install `expo-server-sdk`
-   - Create endpoints for sending notifications
+1. **✅ Backend Service** (COMPLETE)
+   - ✅ Node.js/Express server created in `backend/` directory
+   - ✅ `expo-server-sdk` installed and configured
+   - ✅ Endpoints created for sending notifications
+   - ✅ See `backend/README.md` for setup instructions
 
-2. **Update Notification Helpers**
-   - Replace console.log with API calls
-   - Add error handling
-   - Add retry logic
+2. **✅ Notification Helpers Updated** (COMPLETE)
+   - ✅ Replaced console.log with API calls to backend
+   - ✅ Added error handling and fallback to local notifications
+   - ✅ Configured via `EXPO_PUBLIC_NOTIFICATION_BACKEND_URL` environment variable
 
 3. **Add Notification Analytics**
    - Track notification delivery
@@ -303,6 +332,6 @@ For issues or questions:
 
 ---
 
-**Status**: ✅ Core implementation complete  
-**Next**: Backend service for production push notifications
+**Status**: ✅ Complete - Backend service implemented  
+**Backend**: See `backend/README.md` for setup and deployment instructions
 

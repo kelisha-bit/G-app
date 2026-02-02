@@ -2,8 +2,7 @@
   "expo": {
     "name": "Greater Works City Church",
     "slug": "greater-works-city-church",
-    "version": "1.0.2",
-    "sdkVersion": "54.0.0",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,7 +18,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.gwcc.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "This app needs access to your microphone to record voice messages for the AI assistant.",
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photos to attach images to chat messages."
       }
     },
     "android": {
@@ -28,8 +29,10 @@
         "backgroundColor": "#6366f1"
       },
       "package": "com.gwcc.app",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -52,9 +55,24 @@
       }
     },
     "notification": {
-      "vapidPublicKey": "BI_JwbP_B2ykIG71KLcqnJ8ejqmNWdYGAhA87bHvOHHLwQ33Vfdur4JTW12kFfiPfsYsBJBq_LyLwvJHYueK_mg"
+      "icon": "./assets/icon.png",
+      "color": "#6366f1",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Greater Works City Church"
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdk": 36,
+            "targetSdk": 36,
+            "minSdk": 24,
+            "buildToolsVersion": "36.0.0"
+          }
+        }
+      ],
+      "expo-dev-client",
       [
         "expo-image-picker",
         {
@@ -69,12 +87,25 @@
           "mode": "production"
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "This app needs access to your microphone to record voice messages."
+        }
+      ],
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ]
     ],
     "extra": {
       "eas": {
         "projectId": "518717a0-b81e-4a06-a54e-b599f4155c88"
       }
-    }
+    },
+    "owner": "elishak"
   }
 }

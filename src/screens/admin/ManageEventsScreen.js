@@ -24,9 +24,11 @@ import {
   doc,
   query,
   orderBy,
+  where,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getDayOfWeek, getDayName } from '../../utils/recurringEvents';
+import { sendEventNotification } from '../../utils/sendPushNotification';
 
 export default function ManageEventsScreen({ navigation }) {
   const [events, setEvents] = useState([]);
@@ -34,6 +36,9 @@ export default function ManageEventsScreen({ navigation }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [checkInModalVisible, setCheckInModalVisible] = useState(false);
+  const [selectedEventCheckIns, setSelectedEventCheckIns] = useState([]);
+  const [loadingCheckIns, setLoadingCheckIns] = useState(false);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -67,6 +72,33 @@ export default function ManageEventsScreen({ navigation }) {
       
       querySnapshot.forEach((doc) => {
         eventsList.push({ id: doc.id, ...doc.data() });
+      });
+      
+      // Load check-ins and count per event
+      const checkInsSnapshot = await getDocs(collection(db, 'checkIns'));
+      const checkInCounts = {};
+      
+      checkInsSnapshot.forEach((checkInDoc) => {
+        const checkInData = checkInDoc.data();
+        const serviceId = checkInData.serviceId;
+        if (serviceId) {
+          checkInCounts[serviceId] = (checkInCounts[serviceId] || 0) + 1;
+        }
+        // Also match by service name for backward compatibility
+        const serviceName = checkInData.service;
+        if (serviceName) {
+          eventsList.forEach((event) => {
+            if (event.title === serviceName) {
+              const eventId = event.id;
+              checkInCounts[eventId] = (checkInCounts[eventId] || 0) + 1;
+            }
+          });
+        }
+      });
+      
+      // Add check-in counts to events
+      eventsList.forEach((event) => {
+        event.checkInCount = checkInCounts[event.id] || 0;
       });
       
       setEvents(eventsList);
@@ -219,7 +251,7 @@ export default function ManageEventsScreen({ navigation }) {
         location: location.trim(),
         category: category,
         description: description.trim(),
-        image: imageUrl.trim() || 'https://via.placeholder.com/400x200',
+        image: imageUrl.trim() || null,
         isRecurring: isRecurring,
         isMultiDay: isMultiDay,
         updatedAt: new Date().toISOString(),
@@ -249,12 +281,32 @@ export default function ManageEventsScreen({ navigation }) {
         await updateDoc(doc(db, 'events', selectedEvent.id), eventData);
         Alert.alert('Success', 'Event updated successfully');
       } else {
-        await addDoc(collection(db, 'events'), {
+        const docRef = await addDoc(collection(db, 'events'), {
           ...eventData,
           createdAt: new Date().toISOString(),
           registrations: 0,
         });
-        Alert.alert('Success', 'Event created successfully');
+        
+        // Send push notification for new events
+        try {
+          const result = await sendEventNotification({
+            id: docRef.id,
+            title: title.trim(),
+            description: description.trim(),
+          });
+          
+          if (result.success) {
+            Alert.alert(
+              '✅ Success!',
+              `Event created and notification sent to ${result.sentCount} devices!`
+            );
+          } else {
+            Alert.alert('Success', 'Event created successfully (notification failed)');
+          }
+        } catch (notifError) {
+          console.error('Error sending event notification:', notifError);
+          Alert.alert('Success', 'Event created successfully (notification failed)');
+        }
       }
 
       setModalVisible(false);
@@ -300,6 +352,72 @@ export default function ManageEventsScreen({ navigation }) {
       Other: '#6b7280',
     };
     return colors[cat] || '#6b7280';
+  };
+
+  const viewCheckIns = async (event) => {
+    try {
+      setLoadingCheckIns(true);
+      setSelectedEvent(event);
+      setCheckInModalVisible(true);
+      
+      // Load all check-ins and filter in memory (more reliable than Firestore queries)
+      const allCheckInsSnapshot = await getDocs(collection(db, 'checkIns'));
+      const allCheckIns = [];
+      
+      allCheckInsSnapshot.forEach((doc) => {
+        const checkInData = doc.data();
+        // Match by serviceId or service name
+        if (checkInData.serviceId === event.id || checkInData.service === event.title) {
+          // Extract date from check-in (use date field if available, otherwise extract from checkedInAt)
+          let checkInDate = checkInData.date;
+          if (!checkInDate && checkInData.checkedInAt) {
+            checkInDate = new Date(checkInData.checkedInAt).toISOString().split('T')[0];
+          }
+          
+          // For non-recurring events, filter by exact date match
+          if (!event.isRecurring && event.date) {
+            const eventDate = event.date.split('T')[0]; // Handle ISO strings
+            if (checkInDate === eventDate) {
+              allCheckIns.push({ id: doc.id, ...checkInData, checkInDate });
+            }
+          } 
+          // For recurring events, include all check-ins (they'll be grouped by date in display)
+          else if (event.isRecurring) {
+            allCheckIns.push({ id: doc.id, ...checkInData, checkInDate });
+          }
+          // For multi-day events, check if check-in date falls within event date range
+          else if (event.isMultiDay && event.date && event.endDate) {
+            const eventStartDate = event.date.split('T')[0];
+            const eventEndDate = event.endDate.split('T')[0];
+            if (checkInDate && checkInDate >= eventStartDate && checkInDate <= eventEndDate) {
+              allCheckIns.push({ id: doc.id, ...checkInData, checkInDate });
+            }
+          }
+          // Fallback: if event has a date, match it
+          else if (event.date && checkInDate) {
+            const eventDate = event.date.split('T')[0];
+            if (checkInDate === eventDate) {
+              allCheckIns.push({ id: doc.id, ...checkInData, checkInDate });
+            }
+          }
+        }
+      });
+      
+      // Sort by check-in time (most recent first)
+      allCheckIns.sort((a, b) => {
+        const timeA = new Date(a.checkedInAt || a.date || 0);
+        const timeB = new Date(b.checkedInAt || b.date || 0);
+        return timeB - timeA;
+      });
+      
+      setSelectedEventCheckIns(allCheckIns);
+    } catch (error) {
+      console.error('Error loading check-ins:', error);
+      Alert.alert('Error', 'Failed to load check-ins. Please try again.');
+      setCheckInModalVisible(false);
+    } finally {
+      setLoadingCheckIns(false);
+    }
   };
 
   const renderEventCard = (event) => (
@@ -389,6 +507,19 @@ export default function ManageEventsScreen({ navigation }) {
             {event.registrations || 0} registered
           </Text>
         </View>
+        <TouchableOpacity 
+          style={styles.checkInInfo} 
+          onPress={() => viewCheckIns(event)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+          <Text style={styles.checkInText}>
+            {event.checkInCount || 0} checked in
+          </Text>
+          {(event.checkInCount || 0) > 0 && (
+            <Ionicons name="chevron-forward" size={16} color="#10b981" style={{ marginLeft: 4 }} />
+          )}
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -744,6 +875,121 @@ export default function ManageEventsScreen({ navigation }) {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Check-Ins Modal */}
+      <Modal
+        visible={checkInModalVisible}
+        animationType="slide"
+        onRequestClose={() => setCheckInModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <LinearGradient colors={['#6366f1', '#8b5cf6']} style={styles.modalHeader}>
+            <View>
+              <Text style={styles.modalTitle}>
+                Check-Ins: {selectedEvent?.title}
+              </Text>
+              <Text style={styles.modalSubtitle}>
+                {selectedEventCheckIns.length} {selectedEventCheckIns.length === 1 ? 'person' : 'people'} checked in
+                {selectedEvent?.isRecurring 
+                  ? ' (all dates)' 
+                  : selectedEvent?.date 
+                    ? ` • ${new Date(selectedEvent.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : ''}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setCheckInModalVisible(false)}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </TouchableOpacity>
+          </LinearGradient>
+
+          <ScrollView style={styles.modalContent}>
+            {loadingCheckIns ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#6366f1" />
+                <Text style={styles.loadingText}>Loading check-ins...</Text>
+              </View>
+            ) : selectedEventCheckIns.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="checkmark-circle-outline" size={64} color="#d1d5db" />
+                <Text style={styles.emptyText}>No check-ins yet</Text>
+                <Text style={styles.emptySubtext}>
+                  Users will appear here once they check in to this event
+                </Text>
+              </View>
+            ) : (
+              (() => {
+                // Group check-ins by date for recurring events
+                const groupedCheckIns = selectedEvent?.isRecurring 
+                  ? selectedEventCheckIns.reduce((groups, checkIn) => {
+                      const date = checkIn.checkInDate || checkIn.date || 
+                        (checkIn.checkedInAt ? new Date(checkIn.checkedInAt).toISOString().split('T')[0] : 'Unknown');
+                      if (!groups[date]) {
+                        groups[date] = [];
+                      }
+                      groups[date].push(checkIn);
+                      return groups;
+                    }, {})
+                  : { 'all': selectedEventCheckIns };
+
+                const sortedDates = Object.keys(groupedCheckIns).sort((a, b) => {
+                  if (a === 'all' || a === 'Unknown') return 1;
+                  if (b === 'all' || b === 'Unknown') return -1;
+                  return b.localeCompare(a); // Most recent first
+                });
+
+                return sortedDates.map((dateKey) => {
+                  const checkInsForDate = groupedCheckIns[dateKey];
+                  const formattedDate = dateKey !== 'all' && dateKey !== 'Unknown'
+                    ? new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })
+                    : null;
+
+                  return (
+                    <View key={dateKey}>
+                      {formattedDate && (
+                        <View style={styles.dateHeader}>
+                          <Ionicons name="calendar" size={16} color="#6366f1" />
+                          <Text style={styles.dateHeaderText}>{formattedDate}</Text>
+                          <Text style={styles.dateHeaderCount}>({checkInsForDate.length})</Text>
+                        </View>
+                      )}
+                      {checkInsForDate.map((checkIn, index) => (
+                        <View key={checkIn.id} style={[styles.checkInItem, index !== checkInsForDate.length - 1 && styles.checkInItemBorder]}>
+                          <View style={styles.checkInAvatar}>
+                            <Text style={styles.checkInAvatarText}>
+                              {checkIn.userName?.charAt(0)?.toUpperCase() || 'U'}
+                            </Text>
+                          </View>
+                          <View style={styles.checkInDetails}>
+                            <Text style={styles.checkInName}>{checkIn.userName || 'Unknown User'}</Text>
+                            <Text style={styles.checkInEmail}>{checkIn.userEmail || ''}</Text>
+                            <Text style={styles.checkInTime}>
+                              {checkIn.checkedInAt 
+                                ? new Date(checkIn.checkedInAt).toLocaleString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: formattedDate ? undefined : 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit'
+                                  })
+                                : checkIn.date || 'Unknown time'}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  );
+                });
+              })()
+            )}
+            <View style={{ height: 30 }} />
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -913,6 +1159,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
     paddingTop: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   registrationsInfo: {
     flexDirection: 'row',
@@ -923,6 +1172,93 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6366f1',
     fontWeight: '600',
+  },
+  checkInInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkInText: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: '#10b981',
+    fontWeight: '600',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: 4,
+  },
+  checkInItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  checkInItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  dateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    backgroundColor: '#ede9fe',
+    borderRadius: 8,
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  dateHeaderText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6366f1',
+    marginLeft: 8,
+    flex: 1,
+  },
+  dateHeaderCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8b5cf6',
+  },
+  checkInAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#10b981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  checkInAvatarText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  checkInDetails: {
+    flex: 1,
+  },
+  checkInName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  checkInEmail: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  checkInTime: {
+    fontSize: 12,
+    color: '#9ca3af',
   },
   modalContainer: {
     flex: 1,

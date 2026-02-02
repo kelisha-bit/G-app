@@ -31,6 +31,7 @@ import {
 import { db, auth } from '../../firebase.config';
 import { generatePrayerSuggestion, suggestBibleVerses } from '../utils/aiService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { sendPrayerNotification } from '../utils/sendPushNotification';
 
 export default function PrayerScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -184,7 +185,7 @@ export default function PrayerScreen({ navigation }) {
     setSubmitting(true);
     try {
       const user = auth.currentUser;
-      await addDoc(collection(db, 'prayerRequests'), {
+      const docRef = await addDoc(collection(db, 'prayerRequests'), {
         title: prayerTitle.trim(),
         request: prayerRequest.trim(),
         author: isAnonymous ? 'Anonymous' : user.displayName || 'User',
@@ -194,6 +195,17 @@ export default function PrayerScreen({ navigation }) {
         prayedBy: [],
         createdAt: serverTimestamp(),
       });
+
+      // Send push notification to all users about new prayer request
+      try {
+        await sendPrayerNotification({
+          id: docRef.id,
+          title: prayerTitle.trim(),
+        });
+      } catch (notifError) {
+        console.error('Error sending prayer notification:', notifError);
+        // Don't fail the prayer submission if notification fails
+      }
 
       Alert.alert('Success', 'Your prayer request has been submitted', [
         {
@@ -295,7 +307,12 @@ export default function PrayerScreen({ navigation }) {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Prayer</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity
+          onPress={() => navigation.navigate('GoalsChallenges')}
+          style={{ padding: 8 }}
+        >
+          <Ionicons name="flag" size={20} color="#fff" />
+        </TouchableOpacity>
       </LinearGradient>
 
       <View style={styles.tabsContainer}>

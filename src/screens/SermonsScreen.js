@@ -9,12 +9,11 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { db } from '../../firebase.config';
-import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SermonsScreen({ navigation }) {
@@ -24,6 +23,7 @@ export default function SermonsScreen({ navigation }) {
   const [sermons, setSermons] = useState([]);
   const [filteredSermons, setFilteredSermons] = useState([]);
   const [series, setSeries] = useState([]);
+  const [selectedSeries, setSelectedSeries] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const tabs = ['Recent', 'Series', 'Popular'];
@@ -34,7 +34,7 @@ export default function SermonsScreen({ navigation }) {
 
   useEffect(() => {
     filterSermons();
-  }, [searchQuery, selectedTab, sermons]);
+  }, [searchQuery, selectedTab, sermons, selectedSeries]);
 
   const loadSermons = async () => {
     try {
@@ -65,7 +65,7 @@ export default function SermonsScreen({ navigation }) {
             seriesMap.set(seriesName, {
               title: seriesName,
               episodes: 0,
-              image: sermon.image || 'https://via.placeholder.com/300x150',
+              image: sermon.image || null,
             });
           }
           seriesMap.get(seriesName).episodes++;
@@ -82,6 +82,13 @@ export default function SermonsScreen({ navigation }) {
 
   const filterSermons = () => {
     let filtered = [...sermons];
+
+    // Apply series filter if a series is selected
+    if (selectedSeries) {
+      filtered = filtered.filter((sermon) => 
+        sermon.series && sermon.series.trim() === selectedSeries
+      );
+    }
 
     // Apply search filter
     if (searchQuery.trim()) {
@@ -103,10 +110,10 @@ export default function SermonsScreen({ navigation }) {
         return viewsB - viewsA;
       });
     } else if (selectedTab === 'Recent') {
-      // Already sorted by date from Firebase query
+      // Sort by date
       filtered = filtered.sort((a, b) => {
-        const dateA = new Date(a.date || a.createdAt || 0);
-        const dateB = new Date(b.date || b.createdAt || 0);
+        const dateA = parseDate(a.date || a.createdAt);
+        const dateB = parseDate(b.date || b.createdAt);
         return dateB - dateA;
       });
     }
@@ -115,11 +122,36 @@ export default function SermonsScreen({ navigation }) {
     setFilteredSermons(filtered);
   };
 
+  const parseDate = (dateValue) => {
+    if (!dateValue) return new Date(0);
+    
+    try {
+      // Handle Firestore Timestamp objects
+      if (dateValue && typeof dateValue.toDate === 'function') {
+        return dateValue.toDate();
+      }
+      
+      // Handle date strings or numbers
+      const date = new Date(dateValue);
+      if (isNaN(date.getTime())) return new Date(0);
+      return date;
+    } catch (error) {
+      return new Date(0);
+    }
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return 'Date not available';
     
     try {
-      const date = new Date(dateString);
+      // Handle Firestore Timestamp objects
+      let date;
+      if (dateString && typeof dateString.toDate === 'function') {
+        date = dateString.toDate();
+      } else {
+        date = new Date(dateString);
+      }
+      
       if (isNaN(date.getTime())) return dateString; // Return original if invalid
       
       return date.toLocaleDateString('en-US', {
@@ -149,8 +181,8 @@ export default function SermonsScreen({ navigation }) {
     return num.toString();
   };
 
-  const handlePlaySermon = async (sermon) => {
-    // Try video first, then audio
+  const handlePlaySermon = (sermon) => {
+    // Check if sermon has media
     const url = sermon.videoUrl || sermon.audioUrl;
     
     if (!url) {
@@ -158,16 +190,9 @@ export default function SermonsScreen({ navigation }) {
       return;
     }
 
-    try {
-      const supported = await Linking.canOpenURL(url);
-      if (supported) {
-        await Linking.openURL(url);
-      } else {
-        Alert.alert('Error', `Cannot open this URL: ${url}`);
-      }
-    } catch (error) {
-      console.error('Error opening URL:', error);
-      Alert.alert('Error', 'Failed to open sermon. Please check the link.');
+    // Navigate to sermon player screen
+    if (navigation) {
+      navigation.navigate('SermonPlayer', { sermon });
     }
   };
 
@@ -196,7 +221,12 @@ export default function SermonsScreen({ navigation }) {
           <TouchableOpacity
             key={tab}
             style={[styles.tab, selectedTab === tab && styles.tabSelected]}
-            onPress={() => setSelectedTab(tab)}
+            onPress={() => {
+              setSelectedTab(tab);
+              if (tab === 'Series') {
+                setSelectedSeries(null); // Clear series filter when switching to Series tab
+              }
+            }}
           >
             <Text style={[styles.tabText, selectedTab === tab && styles.tabTextSelected]}>
               {tab}
@@ -226,12 +256,32 @@ export default function SermonsScreen({ navigation }) {
                 </View>
               ) : (
                 series.map((item, index) => (
-                  <TouchableOpacity key={index} style={styles.seriesCard}>
-                    <Image 
-                      source={{ uri: item.image }} 
-                      style={styles.seriesImage}
-                      defaultSource={{ uri: 'https://via.placeholder.com/300x150' }}
-                    />
+                  <TouchableOpacity 
+                    key={index} 
+                    style={styles.seriesCard}
+                    onPress={() => {
+                      setSelectedSeries(item.title);
+                      setSelectedTab('Recent'); // Switch to Recent tab to show filtered sermons
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    {item.image ? (
+                      <Image 
+                        source={{ uri: item.image }} 
+                        style={styles.seriesImage}
+                      />
+                    ) : (
+                      <LinearGradient
+                        colors={['#6366f1', '#8b5cf6']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.seriesImage}
+                      >
+                        <View style={{ justifyContent: 'center', alignItems: 'center', flex: 1 }}>
+                          <Ionicons name="videocam" size={48} color="#fff" style={{ opacity: 0.7 }} />
+                        </View>
+                      </LinearGradient>
+                    )}
                     <View style={styles.seriesOverlay}>
                       <Text style={styles.seriesTitle}>{item.title}</Text>
                       <Text style={styles.seriesEpisodes}>{item.episodes} {item.episodes === 1 ? 'Episode' : 'Episodes'}</Text>
@@ -242,15 +292,29 @@ export default function SermonsScreen({ navigation }) {
             </View>
           ) : (
             <View>
+              {selectedSeries && (
+                <View style={styles.selectedSeriesContainer}>
+                  <Text style={styles.selectedSeriesText}>Series: {selectedSeries}</Text>
+                  <TouchableOpacity
+                    onPress={() => setSelectedSeries(null)}
+                    style={styles.clearSeriesButton}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#6366f1" />
+                    <Text style={styles.clearSeriesText}>Clear</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               {filteredSermons.length === 0 ? (
                 <View style={styles.emptyContainer}>
                   <Ionicons name="videocam-outline" size={64} color="#d1d5db" />
                   <Text style={styles.emptyText}>
-                    {searchQuery ? 'No Sermons Found' : 'No Sermons Available'}
+                    {searchQuery ? 'No Sermons Found' : selectedSeries ? `No Sermons in "${selectedSeries}"` : 'No Sermons Available'}
                   </Text>
                   <Text style={styles.emptySubtext}>
                     {searchQuery 
                       ? 'Try adjusting your search terms' 
+                      : selectedSeries
+                      ? 'This series does not have any sermons yet'
                       : 'Sermons will appear here once they are uploaded'}
                   </Text>
                 </View>
@@ -262,10 +326,23 @@ export default function SermonsScreen({ navigation }) {
                     onPress={() => handlePlaySermon(sermon)}
                     activeOpacity={0.8}
                   >
-                    <Image 
-                      source={{ uri: sermon.image || 'https://via.placeholder.com/400x200' }} 
-                      style={styles.sermonImage}
-                    />
+                    {sermon.image ? (
+                      <Image 
+                        source={{ uri: sermon.image }} 
+                        style={styles.sermonImage}
+                      />
+                    ) : (
+                      <LinearGradient
+                        colors={['#6366f1', '#8b5cf6']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.sermonImage}
+                      >
+                        <View style={{ justifyContent: 'center', alignItems: 'center', flex: 1 }}>
+                          <Ionicons name="videocam" size={48} color="#fff" style={{ opacity: 0.7 }} />
+                        </View>
+                      </LinearGradient>
+                    )}
                     <View style={styles.playOverlay}>
                       <View style={styles.playButton}>
                         <Ionicons 
@@ -578,6 +655,33 @@ const styles = StyleSheet.create({
   seriesBadgeText: {
     color: '#fff',
     fontSize: 11,
+    fontWeight: '600',
+  },
+  selectedSeriesContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ede9fe',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+  selectedSeriesText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6366f1',
+    flex: 1,
+  },
+  clearSeriesButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  clearSeriesText: {
+    fontSize: 12,
+    color: '#6366f1',
+    marginLeft: 4,
     fontWeight: '600',
   },
 });

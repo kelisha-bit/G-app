@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -8,58 +8,92 @@ import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase.config';
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
+import { Platform, View, ActivityIndicator } from 'react-native';
 import { useNavigationContainerRef } from '@react-navigation/native';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import notificationService from './src/utils/notificationService';
 
-// Auth Screens
+// Loading component for lazy-loaded screens
+const ScreenLoader = () => (
+  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+    <ActivityIndicator size="large" color="#6366f1" />
+  </View>
+);
+
+// Critical screens - loaded immediately (auth and main tabs)
 import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
-
-// Main Screens
 import HomeScreen from './src/screens/HomeScreen';
-import CheckInScreen from './src/screens/CheckInScreen';
 import EventsScreen from './src/screens/EventsScreen';
-import EventDetailsScreen from './src/screens/EventDetailsScreen';
 import SermonsScreen from './src/screens/SermonsScreen';
-import DevotionalScreen from './src/screens/DevotionalScreen';
-import GivingScreen from './src/screens/GivingScreen';
-import GivingHistoryScreen from './src/screens/GivingHistoryScreen';
-import DepartmentsScreen from './src/screens/DepartmentsScreen';
-import DepartmentDetailsScreen from './src/screens/DepartmentDetailsScreen';
-import MinistriesScreen from './src/screens/MinistriesScreen';
-import VolunteerScreen from './src/screens/VolunteerScreen';
-import DirectoryScreen from './src/screens/DirectoryScreen';
-import PrayerScreen from './src/screens/PrayerScreen';
-import MessagesScreen from './src/screens/MessagesScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import BibleScreen from './src/screens/BibleScreen';
-import SmallGroupsScreen from './src/screens/SmallGroupsScreen';
-import SermonNotesScreen from './src/screens/SermonNotesScreen';
-import MediaGalleryScreen from './src/screens/MediaGalleryScreen';
-import ChurchCalendarScreen from './src/screens/ChurchCalendarScreen';
-import FamilyMinistryScreen from './src/screens/FamilyMinistryScreen';
-import MyActivityScreen from './src/screens/MyActivityScreen';
-import EditProfileScreen from './src/screens/EditProfileScreen';
-import NotificationScreen from './src/screens/NotificationScreen';
-import PrivacyScreen from './src/screens/PrivacyScreen';
-import HelpSupportScreen from './src/screens/HelpSupportScreen';
-import AboutScreen from './src/screens/AboutScreen';
-import ResourcesScreen from './src/screens/ResourcesScreen';
-import DiscipleshipTrainingScreen from './src/screens/DiscipleshipTrainingScreen';
-import AdminDashboardScreen from './src/screens/admin/AdminDashboardScreen';
-import ManageMembersScreen from './src/screens/admin/ManageMembersScreen';
-import ManageEventsScreen from './src/screens/admin/ManageEventsScreen';
-import ManageSermonsScreen from './src/screens/admin/ManageSermonsScreen';
-import ManageAnnouncementsScreen from './src/screens/admin/ManageAnnouncementsScreen';
-import ManageDevotionalsScreen from './src/screens/admin/ManageDevotionalsScreen';
-import ManageVolunteersScreen from './src/screens/admin/ManageVolunteersScreen';
-import MemberActivityScreen from './src/screens/admin/MemberActivityScreen';
-import ReportsScreen from './src/screens/admin/ReportsScreen';
-import ManageBannerScreen from './src/screens/admin/ManageBannerScreen';
-import ManageResourcesScreen from './src/screens/admin/ManageResourcesScreen';
-import AdminSettingsScreen from './src/screens/admin/AdminSettingsScreen';
+
+// Lazy load non-critical screens for better code splitting
+const CheckInScreen = React.lazy(() => import('./src/screens/CheckInScreen'));
+const EventDetailsScreen = React.lazy(() => import('./src/screens/EventDetailsScreen'));
+const DevotionalScreen = React.lazy(() => import('./src/screens/DevotionalScreen'));
+const GivingScreen = React.lazy(() => import('./src/screens/GivingScreen'));
+const GivingHistoryScreen = React.lazy(() => import('./src/screens/GivingHistoryScreen'));
+const DepartmentsScreen = React.lazy(() => import('./src/screens/DepartmentsScreen'));
+const DepartmentDetailsScreen = React.lazy(() => import('./src/screens/DepartmentDetailsScreen'));
+const MinistriesScreen = React.lazy(() => import('./src/screens/MinistriesScreen'));
+const VolunteerScreen = React.lazy(() => import('./src/screens/VolunteerScreen'));
+const DirectoryScreen = React.lazy(() => import('./src/screens/DirectoryScreen'));
+const PrayerScreen = React.lazy(() => import('./src/screens/PrayerScreen'));
+const MessagesScreen = React.lazy(() => import('./src/screens/MessagesScreen'));
+const BibleScreen = React.lazy(() => import('./src/screens/BibleScreen'));
+const SmallGroupsScreen = React.lazy(() => import('./src/screens/SmallGroupsScreen'));
+const SermonNotesScreen = React.lazy(() => import('./src/screens/SermonNotesScreen'));
+const SermonPlayerScreen = React.lazy(() => import('./src/screens/SermonPlayerScreen'));
+const MediaGalleryScreen = React.lazy(() => import('./src/screens/MediaGalleryScreen'));
+const ChurchCalendarScreen = React.lazy(() => import('./src/screens/ChurchCalendarScreen'));
+const FamilyMinistryScreen = React.lazy(() => import('./src/screens/FamilyMinistryScreen'));
+const MyActivityScreen = React.lazy(() => import('./src/screens/MyActivityScreen'));
+const EditProfileScreen = React.lazy(() => import('./src/screens/EditProfileScreen'));
+const NotificationScreen = React.lazy(() => import('./src/screens/NotificationScreen'));
+const PrivacyScreen = React.lazy(() => import('./src/screens/PrivacyScreen'));
+const HelpSupportScreen = React.lazy(() => import('./src/screens/HelpSupportScreen'));
+const AboutScreen = React.lazy(() => import('./src/screens/AboutScreen'));
+const ChatBotScreen = React.lazy(() => import('./src/screens/ChatBotScreen'));
+const ResourcesScreen = React.lazy(() => import('./src/screens/ResourcesScreen'));
+const DiscipleshipTrainingScreen = React.lazy(() => import('./src/screens/DiscipleshipTrainingScreen'));
+const LiveStreamingScreen = React.lazy(() => import('./src/screens/LiveStreamingScreen'));
+const CommunityFeedScreen = React.lazy(() => import('./src/screens/CommunityFeedScreen'));
+const TestimoniesScreen = React.lazy(() => import('./src/screens/TestimoniesScreen'));
+const NewsScreen = React.lazy(() => import('./src/screens/NewsScreen'));
+const ArticleDetailsScreen = React.lazy(() => import('./src/screens/ArticleDetailsScreen'));
+const PrayerJournalScreen = React.lazy(() => import('./src/screens/PrayerJournalScreen'));
+const AddPrayerEntryScreen = React.lazy(() => import('./src/screens/AddPrayerEntryScreen'));
+const PrayerEntryDetailsScreen = React.lazy(() => import('./src/screens/PrayerEntryDetailsScreen'));
+const GoalsChallengesScreen = React.lazy(() => import('./src/screens/GoalsChallengesScreen'));
+const AdminDashboardScreen = React.lazy(() => import('./src/screens/admin/AdminDashboardScreen'));
+const ManageMembersScreen = React.lazy(() => import('./src/screens/admin/ManageMembersScreen'));
+const ManageEventsScreen = React.lazy(() => import('./src/screens/admin/ManageEventsScreen'));
+const ManageSermonsScreen = React.lazy(() => import('./src/screens/admin/ManageSermonsScreen'));
+const ManageAnnouncementsScreen = React.lazy(() => import('./src/screens/admin/ManageAnnouncementsScreen'));
+const ManageDevotionalsScreen = React.lazy(() => import('./src/screens/admin/ManageDevotionalsScreen'));
+const ManageVolunteersScreen = React.lazy(() => import('./src/screens/admin/ManageVolunteersScreen'));
+const MemberActivityScreen = React.lazy(() => import('./src/screens/admin/MemberActivityScreen'));
+const ReportsScreen = React.lazy(() => import('./src/screens/admin/ReportsScreen'));
+const ManageBannerScreen = React.lazy(() => import('./src/screens/admin/ManageBannerScreen'));
+const ManageResourcesScreen = React.lazy(() => import('./src/screens/admin/ManageResourcesScreen'));
+const ManageLiveStreamsScreen = React.lazy(() => import('./src/screens/admin/ManageLiveStreamsScreen'));
+const ManageNewsScreen = React.lazy(() => import('./src/screens/admin/ManageNewsScreen'));
+const AdminSettingsScreen = React.lazy(() => import('./src/screens/admin/AdminSettingsScreen'));
+const ChurchStaffScreen = React.lazy(() => import('./src/screens/ChurchStaffScreen'));
+const ManageChurchStaffScreen = React.lazy(() => import('./src/screens/admin/ManageChurchStaffScreen'));
+const ManageServiceLeadersScreen = React.lazy(() => import('./src/screens/admin/ManageServiceLeadersScreen'));
+const ServiceLeadersScreen = React.lazy(() => import('./src/screens/ServiceLeadersScreen'));
+const ManageCourseEnrollmentsScreen = React.lazy(() => import('./src/screens/admin/ManageCourseEnrollmentsScreen'));
+
+// Helper to create lazy screen components for React Navigation
+const createLazyScreen = (lazyComponent) => {
+  return (props) => (
+    <Suspense fallback={<ScreenLoader />}>
+      {React.createElement(lazyComponent, props)}
+    </Suspense>
+  );
+};
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -121,6 +155,16 @@ export default function App() {
   const navigationRef = useNavigationContainerRef();
   const [navigationReady, setNavigationReady] = useState(false);
 
+  // Initialize Android notification channels immediately on app start
+  // This MUST happen before any notifications are sent
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      notificationService.initializeAndroidChannels().catch(error => {
+        console.error('Error initializing Android notification channels:', error);
+      });
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
@@ -129,7 +173,13 @@ export default function App() {
       // Register for push notifications when user logs in
       if (user) {
         try {
-          await notificationService.registerForPushNotifications();
+          const result = await notificationService.registerForPushNotifications();
+          if (!result.success && result.error) {
+            if (__DEV__) {
+              console.warn('Push notification registration failed on login:', result.error);
+              // Don't show alert on automatic login registration - user can enable manually in settings
+            }
+          }
         } catch (error) {
           console.error('Error setting up notifications:', error);
         }
@@ -182,44 +232,62 @@ export default function App() {
             ) : (
               <>
                 <Stack.Screen name="MainTabs" component={MainTabs} />
-                <Stack.Screen name="CheckIn" component={CheckInScreen} />
-                <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
-                <Stack.Screen name="Devotional" component={DevotionalScreen} />
-                <Stack.Screen name="Giving" component={GivingScreen} />
-                <Stack.Screen name="GivingHistory" component={GivingHistoryScreen} />
-                <Stack.Screen name="Departments" component={DepartmentsScreen} />
-                <Stack.Screen name="DepartmentDetails" component={DepartmentDetailsScreen} />
-                <Stack.Screen name="Ministries" component={MinistriesScreen} />
-                <Stack.Screen name="Volunteer" component={VolunteerScreen} />
-                <Stack.Screen name="Directory" component={DirectoryScreen} />
-                <Stack.Screen name="Prayer" component={PrayerScreen} />
-                <Stack.Screen name="Messages" component={MessagesScreen} />
-                <Stack.Screen name="Bible" component={BibleScreen} />
-                <Stack.Screen name="SmallGroups" component={SmallGroupsScreen} />
-                <Stack.Screen name="SermonNotes" component={SermonNotesScreen} />
-                <Stack.Screen name="MediaGallery" component={MediaGalleryScreen} />
-                <Stack.Screen name="ChurchCalendar" component={ChurchCalendarScreen} />
-                <Stack.Screen name="FamilyMinistry" component={FamilyMinistryScreen} />
-                <Stack.Screen name="MyActivity" component={MyActivityScreen} />
-                <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-                <Stack.Screen name="Notifications" component={NotificationScreen} />
-                <Stack.Screen name="Privacy" component={PrivacyScreen} />
-                <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
-                <Stack.Screen name="About" component={AboutScreen} />
-                <Stack.Screen name="Resources" component={ResourcesScreen} />
-                <Stack.Screen name="DiscipleshipTraining" component={DiscipleshipTrainingScreen} />
-                <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
-                <Stack.Screen name="ManageMembers" component={ManageMembersScreen} />
-                <Stack.Screen name="ManageEvents" component={ManageEventsScreen} />
-                <Stack.Screen name="ManageSermons" component={ManageSermonsScreen} />
-                <Stack.Screen name="ManageAnnouncements" component={ManageAnnouncementsScreen} />
-                <Stack.Screen name="ManageDevotionals" component={ManageDevotionalsScreen} />
-                <Stack.Screen name="ManageVolunteers" component={ManageVolunteersScreen} />
-                <Stack.Screen name="MemberActivity" component={MemberActivityScreen} />
-                <Stack.Screen name="Reports" component={ReportsScreen} />
-                <Stack.Screen name="ManageBanner" component={ManageBannerScreen} />
-                <Stack.Screen name="ManageResources" component={ManageResourcesScreen} />
-                <Stack.Screen name="AdminSettings" component={AdminSettingsScreen} />
+                <Stack.Screen name="CheckIn" component={createLazyScreen(CheckInScreen)} />
+                <Stack.Screen name="EventDetails" component={createLazyScreen(EventDetailsScreen)} />
+                <Stack.Screen name="Devotional" component={createLazyScreen(DevotionalScreen)} />
+                <Stack.Screen name="Giving" component={createLazyScreen(GivingScreen)} />
+                <Stack.Screen name="GivingHistory" component={createLazyScreen(GivingHistoryScreen)} />
+                <Stack.Screen name="Departments" component={createLazyScreen(DepartmentsScreen)} />
+                <Stack.Screen name="DepartmentDetails" component={createLazyScreen(DepartmentDetailsScreen)} />
+                <Stack.Screen name="Ministries" component={createLazyScreen(MinistriesScreen)} />
+                <Stack.Screen name="Volunteer" component={createLazyScreen(VolunteerScreen)} />
+                <Stack.Screen name="Directory" component={createLazyScreen(DirectoryScreen)} />
+                <Stack.Screen name="Prayer" component={createLazyScreen(PrayerScreen)} />
+                <Stack.Screen name="Messages" component={createLazyScreen(MessagesScreen)} />
+                <Stack.Screen name="Bible" component={createLazyScreen(BibleScreen)} />
+                <Stack.Screen name="SmallGroups" component={createLazyScreen(SmallGroupsScreen)} />
+                <Stack.Screen name="SermonNotes" component={createLazyScreen(SermonNotesScreen)} />
+                <Stack.Screen name="SermonPlayer" component={createLazyScreen(SermonPlayerScreen)} />
+                <Stack.Screen name="MediaGallery" component={createLazyScreen(MediaGalleryScreen)} />
+                <Stack.Screen name="ChurchCalendar" component={createLazyScreen(ChurchCalendarScreen)} />
+                <Stack.Screen name="FamilyMinistry" component={createLazyScreen(FamilyMinistryScreen)} />
+                <Stack.Screen name="MyActivity" component={createLazyScreen(MyActivityScreen)} />
+                <Stack.Screen name="EditProfile" component={createLazyScreen(EditProfileScreen)} />
+                <Stack.Screen name="Notifications" component={createLazyScreen(NotificationScreen)} />
+                <Stack.Screen name="Privacy" component={createLazyScreen(PrivacyScreen)} />
+                <Stack.Screen name="HelpSupport" component={createLazyScreen(HelpSupportScreen)} />
+                <Stack.Screen name="About" component={createLazyScreen(AboutScreen)} />
+                <Stack.Screen name="ChatBot" component={createLazyScreen(ChatBotScreen)} />
+                <Stack.Screen name="Resources" component={createLazyScreen(ResourcesScreen)} />
+                <Stack.Screen name="DiscipleshipTraining" component={createLazyScreen(DiscipleshipTrainingScreen)} />
+                <Stack.Screen name="LiveStreaming" component={createLazyScreen(LiveStreamingScreen)} />
+                <Stack.Screen name="CommunityFeed" component={createLazyScreen(CommunityFeedScreen)} />
+                <Stack.Screen name="Testimonies" component={createLazyScreen(TestimoniesScreen)} />
+                <Stack.Screen name="News" component={createLazyScreen(NewsScreen)} />
+                <Stack.Screen name="ArticleDetails" component={createLazyScreen(ArticleDetailsScreen)} />
+                <Stack.Screen name="PrayerJournal" component={createLazyScreen(PrayerJournalScreen)} />
+                <Stack.Screen name="AddPrayerEntry" component={createLazyScreen(AddPrayerEntryScreen)} />
+                <Stack.Screen name="PrayerEntryDetails" component={createLazyScreen(PrayerEntryDetailsScreen)} />
+                <Stack.Screen name="GoalsChallenges" component={createLazyScreen(GoalsChallengesScreen)} />
+                <Stack.Screen name="AdminDashboard" component={createLazyScreen(AdminDashboardScreen)} />
+                <Stack.Screen name="ManageMembers" component={createLazyScreen(ManageMembersScreen)} />
+                <Stack.Screen name="ManageEvents" component={createLazyScreen(ManageEventsScreen)} />
+                <Stack.Screen name="ManageSermons" component={createLazyScreen(ManageSermonsScreen)} />
+                <Stack.Screen name="ManageAnnouncements" component={createLazyScreen(ManageAnnouncementsScreen)} />
+                <Stack.Screen name="ManageDevotionals" component={createLazyScreen(ManageDevotionalsScreen)} />
+                <Stack.Screen name="ManageVolunteers" component={createLazyScreen(ManageVolunteersScreen)} />
+                <Stack.Screen name="MemberActivity" component={createLazyScreen(MemberActivityScreen)} />
+                <Stack.Screen name="Reports" component={createLazyScreen(ReportsScreen)} />
+                <Stack.Screen name="ManageBanner" component={createLazyScreen(ManageBannerScreen)} />
+                <Stack.Screen name="ManageResources" component={createLazyScreen(ManageResourcesScreen)} />
+                <Stack.Screen name="ManageLiveStreams" component={createLazyScreen(ManageLiveStreamsScreen)} />
+                <Stack.Screen name="ManageNews" component={createLazyScreen(ManageNewsScreen)} />
+                <Stack.Screen name="AdminSettings" component={createLazyScreen(AdminSettingsScreen)} />
+                <Stack.Screen name="ChurchStaff" component={createLazyScreen(ChurchStaffScreen)} />
+                <Stack.Screen name="ManageChurchStaff" component={createLazyScreen(ManageChurchStaffScreen)} />
+                <Stack.Screen name="ManageServiceLeaders" component={createLazyScreen(ManageServiceLeadersScreen)} />
+                <Stack.Screen name="ServiceLeaders" component={createLazyScreen(ServiceLeadersScreen)} />
+                <Stack.Screen name="ManageCourseEnrollments" component={createLazyScreen(ManageCourseEnrollmentsScreen)} />
               </>
             )}
           </Stack.Navigator>

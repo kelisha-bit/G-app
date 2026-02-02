@@ -8,6 +8,8 @@ import {
   TextInput,
   Alert,
   Linking,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,6 +72,16 @@ export default function HelpSupportScreen({ navigation }) {
   const supportOptions = [
     {
       id: 1,
+      title: 'AI Assistant',
+      description: 'Chat with our AI assistant for instant help',
+      icon: 'chatbubbles-outline',
+      color: '#8b5cf6',
+      action: () => {
+        navigation.navigate('ChatBot');
+      },
+    },
+    {
+      id: 2,
       title: 'Email Support',
       description: 'Send us an email and we\'ll get back to you',
       icon: 'mail-outline',
@@ -81,7 +93,7 @@ export default function HelpSupportScreen({ navigation }) {
       },
     },
     {
-      id: 2,
+      id: 3,
       title: 'Call Us',
       description: 'Speak with someone directly',
       icon: 'call-outline',
@@ -93,7 +105,7 @@ export default function HelpSupportScreen({ navigation }) {
       },
     },
     {
-      id: 3,
+      id: 4,
       title: 'Visit Us',
       description: 'Come to our church office',
       icon: 'location-outline',
@@ -107,7 +119,7 @@ export default function HelpSupportScreen({ navigation }) {
       },
     },
     {
-      id: 4,
+      id: 5,
       title: 'Report a Bug',
       description: 'Found an issue? Let us know',
       icon: 'bug-outline',
@@ -151,7 +163,11 @@ export default function HelpSupportScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
       <LinearGradient colors={['#6366f1', '#8b5cf6']} style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -163,7 +179,12 @@ export default function HelpSupportScreen({ navigation }) {
         <View style={{ width: 40 }} />
       </LinearGradient>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContent}
+      >
         <View style={styles.infoCard}>
           <Ionicons name="help-circle" size={32} color="#8b5cf6" />
           <Text style={styles.infoTitle}>We're Here to Help</Text>
@@ -255,7 +276,7 @@ export default function HelpSupportScreen({ navigation }) {
 
         <View style={{ height: 30 }} />
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -287,6 +308,8 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
     padding: 20,
   },
   infoCard: {

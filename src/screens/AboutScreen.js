@@ -45,10 +45,10 @@ export default function AboutScreen({ navigation }) {
     {
       id: 1,
       title: 'Address',
-      value: '123 Church Street\nCity, State 12345',
+      value: '123 Faith Avenue, Greater Works City\nJoma Accra, Ghana',
       icon: 'location',
       action: () => {
-        Linking.openURL('https://maps.google.com/?q=123+Church+Street').catch((err) =>
+        Linking.openURL('https://maps.google.com/?q=123+Faith+Avenue,+Greater+Works+City,+Joma+Accra,+Ghana').catch((err) =>
           console.error('Error opening maps:', err)
         );
       },
@@ -56,10 +56,10 @@ export default function AboutScreen({ navigation }) {
     {
       id: 2,
       title: 'Phone',
-      value: '+1 (234) 567-8900',
+      value: '+233 536348894',
       icon: 'call',
       action: () => {
-        Linking.openURL('tel:+12345678900').catch((err) =>
+        Linking.openURL('tel:+233536348894').catch((err) =>
           console.error('Error opening phone:', err)
         );
       },
@@ -208,15 +208,15 @@ export default function AboutScreen({ navigation }) {
           <View style={styles.serviceCard}>
             <View style={styles.serviceItem}>
               <Text style={styles.serviceDay}>Sunday</Text>
-              <Text style={styles.serviceTime}>9:00 AM - 12:00 PM</Text>
+              <Text style={styles.serviceTime}>8:00 AM - 10:30 AM</Text>
             </View>
             <View style={styles.serviceItem}>
               <Text style={styles.serviceDay}>Wednesday</Text>
-              <Text style={styles.serviceTime}>6:00 PM - 8:00 PM</Text>
+              <Text style={styles.serviceTime}>9:00 AM - 1:00 PM</Text>
             </View>
             <View style={styles.serviceItem}>
               <Text style={styles.serviceDay}>Friday</Text>
-              <Text style={styles.serviceTime}>7:00 PM - 9:00 PM</Text>
+              <Text style={styles.serviceTime}>6:30 PM - 8:30 PM</Text>
             </View>
           </View>
         </View>

@@ -226,6 +226,26 @@ export default function AdminDashboardScreen({ navigation }) {
         prayerRequests: prayersSnapshot.size,
       });
 
+      // Count check-ins per event
+      const checkInCounts = {};
+      checkInsSnapshot.forEach((checkInDoc) => {
+        const checkInData = checkInDoc.data();
+        const serviceId = checkInData.serviceId;
+        if (serviceId) {
+          checkInCounts[serviceId] = (checkInCounts[serviceId] || 0) + 1;
+        }
+        // Also match by service name for backward compatibility
+        const serviceName = checkInData.service;
+        if (serviceName) {
+          eventsData.forEach((event) => {
+            if (event.title === serviceName) {
+              const eventId = event.id;
+              checkInCounts[eventId] = (checkInCounts[eventId] || 0) + 1;
+            }
+          });
+        }
+      });
+
       // Filter upcoming events (next 3)
       const now = new Date();
       const upcoming = eventsData
@@ -237,6 +257,7 @@ export default function AdminDashboardScreen({ navigation }) {
           title: event.title,
           date: new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           attendees: event.registrations || 0,
+          checkIns: checkInCounts[event.id] || 0,
         }));
 
       setUpcomingEvents(upcoming);
@@ -381,6 +402,10 @@ export default function AdminDashboardScreen({ navigation }) {
     { id: 11, title: 'Giving', icon: 'heart', color: '#ef4444', screen: 'Giving' },
     { id: 12, title: 'Manage Banner', icon: 'image', color: '#ec4899', screen: 'ManageBanner' },
     { id: 13, title: 'Resources', icon: 'library', color: '#14b8a6', screen: 'ManageResources' },
+    { id: 14, title: 'Live Streams', icon: 'videocam', color: '#ef4444', screen: 'ManageLiveStreams' },
+    { id: 15, title: 'Church Staff', icon: 'people', color: '#6366f1', screen: 'ManageChurchStaff' },
+    { id: 16, title: 'Service Leaders', icon: 'calendar', color: '#10b981', screen: 'ManageServiceLeaders' },
+    { id: 17, title: 'Course Enrollments', icon: 'school', color: '#8b5cf6', screen: 'ManageCourseEnrollments' },
   ];
 
   const handleSettingsPress = () => {
@@ -772,7 +797,13 @@ export default function AdminDashboardScreen({ navigation }) {
                       <View style={styles.eventMetaItem}>
                         <Ionicons name="people-outline" size={14} color="#6b7280" />
                         <Text style={styles.eventAttendees}>
-                          {event.attendees} expected
+                          {event.attendees} registered
+                        </Text>
+                      </View>
+                      <View style={styles.eventMetaItem}>
+                        <Ionicons name="checkmark-circle-outline" size={14} color="#10b981" />
+                        <Text style={styles.eventCheckIns}>
+                          {event.checkIns || 0} checked in
                         </Text>
                       </View>
                     </View>
@@ -1301,6 +1332,12 @@ const styles = StyleSheet.create({
   eventAttendees: {
     fontSize: 13,
     color: '#6b7280',
+    marginLeft: 5,
+    fontWeight: '500',
+  },
+  eventCheckIns: {
+    fontSize: 13,
+    color: '#10b981',
     marginLeft: 5,
     fontWeight: '500',
   },

@@ -62,7 +62,7 @@ export default function EventsScreen({ navigation }) {
           location: 'Main Sanctuary',
           category: 'Worship',
           description: 'Join us for a powerful worship experience with praise, worship, and the Word of God.',
-          image: 'https://via.placeholder.com/400x200',
+          image: null,
           registrations: 856,
         },
         {
@@ -73,7 +73,7 @@ export default function EventsScreen({ navigation }) {
           location: 'Youth Center',
           category: 'Youth',
           description: 'Annual youth gathering with special guest speakers, worship, and fellowship.',
-          image: 'https://via.placeholder.com/400x200',
+          image: null,
           registrations: 120,
         },
         {
@@ -84,7 +84,7 @@ export default function EventsScreen({ navigation }) {
           location: 'Prayer Room',
           category: 'Prayer',
           description: '21 days of prayer and fasting for breakthrough and spiritual growth.',
-          image: 'https://via.placeholder.com/400x200',
+          image: null,
           registrations: 200,
         },
         {
@@ -95,7 +95,7 @@ export default function EventsScreen({ navigation }) {
           location: 'Community Center',
           category: 'Outreach',
           description: 'Serving our community with love and compassion. Bring food and supplies.',
-          image: 'https://via.placeholder.com/400x200',
+          image: null,
           registrations: 85,
         },
       ]);
@@ -214,10 +214,23 @@ export default function EventsScreen({ navigation }) {
       onPress={() => navigation.navigate('EventDetails', { eventId: event.id })}
       activeOpacity={0.7}
     >
-      <Image 
-        source={{ uri: event.image || 'https://via.placeholder.com/400x200' }} 
-        style={styles.eventImage} 
-      />
+      {event.image ? (
+        <Image 
+          source={{ uri: event.image }} 
+          style={styles.eventImage} 
+        />
+      ) : (
+        <LinearGradient
+          colors={['#6366f1', '#8b5cf6']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.eventImage}
+        >
+          <View style={{ justifyContent: 'center', alignItems: 'center', flex: 1 }}>
+            <Ionicons name="calendar" size={48} color="#fff" style={{ opacity: 0.7 }} />
+          </View>
+        </LinearGradient>
+      )}
       
       {/* Status Badge */}
       {event.isRecurringInstance && (

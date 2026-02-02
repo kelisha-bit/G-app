@@ -185,7 +185,7 @@ export default function EditProfileScreen({ navigation }) {
       
       Alert.alert('Success', 'Profile photo uploaded successfully!');
     } catch (error) {
-      console.error('Error uploading image:', error);
+      if (__DEV__) console.error('Error uploading image:', error);
       let errorMessage = 'Failed to upload photo. Please try again.';
       if (error.code === 'storage/unauthorized') {
         errorMessage = 'You do not have permission to upload photos. Please check your account permissions.';
@@ -248,7 +248,7 @@ export default function EditProfileScreen({ navigation }) {
         },
       ]);
     } catch (error) {
-      console.error('Error saving profile:', error);
+      if (__DEV__) console.error('Error saving profile:', error);
       Alert.alert('Error', 'Failed to update profile. Please try again.');
     } finally {
       setSaving(false);

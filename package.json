@@ -8,16 +8,19 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "npx expo export:web",
+    "serve:web": "npx serve web-build",
     "seed:departments": "node scripts/seedDepartments.js",
     "seed:ministries": "node scripts/seedMinistries.js",
     "seed:giving": "node scripts/seedGiving.js",
+    "seed:materials": "node scripts/seedTrainingMaterials.js",
     "generate:vapid-keys": "node scripts/generateVapidKeys.js",
     "build:android": "eas build --platform android --profile production",
     "build:ios": "eas build --platform ios --profile production",
     "build:preview": "eas build --platform android --profile preview",
     "submit:android": "eas submit --platform android",
     "submit:ios": "eas submit --platform ios",
-    "deploy:firebase": "powershell -ExecutionPolicy Bypass -File scripts/deploy-firebase.ps1"
+    "deploy:firebase": "powershell -ExecutionPolicy Bypass -File scripts/deploy-firebase.ps1",
+    "update:web": "powershell -ExecutionPolicy Bypass -File scripts/update-and-deploy.ps1"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -25,15 +28,24 @@
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.13",
     "@react-navigation/stack": "^7.1.1",
-    "babel-preset-expo": "~54.0.9",
+    "babel-preset-expo": "~54.0.10",
     "buffer": "^6.0.3",
     "crypto-browserify": "^3.12.1",
     "dotenv": "^17.2.3",
     "expo": "~54.0.0",
-    "expo-font": "~14.0.10",
+    "expo-av": "~16.0.8",
+    "expo-build-properties": "^1.0.10",
+    "expo-constants": "~18.0.13",
+    "expo-dev-client": "^6.0.20",
+    "expo-device": "~8.0.10",
+    "expo-document-picker": "~14.0.8",
+    "expo-file-system": "~18.0.4",
+    "expo-font": "~14.0.11",
     "expo-image-picker": "~17.0.10",
     "expo-linear-gradient": "~15.0.8",
     "expo-notifications": "~0.32.16",
+    "expo-print": "~14.0.3",
+    "expo-sharing": "~13.0.1",
     "expo-status-bar": "~3.0.9",
     "expo-video": "^3.0.15",
     "firebase": "^11.1.0",
@@ -50,7 +62,8 @@
     "stream-browserify": "^3.0.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.25.2"
+    "@babel/core": "^7.25.2",
+    "webpack-cli": "^6.0.1"
   },
   "private": true
 }

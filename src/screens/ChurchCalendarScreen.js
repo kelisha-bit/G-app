@@ -16,7 +16,10 @@ import { db } from '../../firebase.config';
 import { expandRecurringEvents } from '../utils/recurringEvents';
 
 const { width } = Dimensions.get('window');
-const DAY_WIDTH = width / 7;
+const CALENDAR_PADDING = 16;
+const CALENDAR_MARGIN = 16;
+const AVAILABLE_WIDTH = width - (CALENDAR_MARGIN * 2) - (CALENDAR_PADDING * 2);
+const DAY_WIDTH = AVAILABLE_WIDTH / 7;
 
 // Category colors
 const categoryColors = {
@@ -37,6 +40,7 @@ export default function ChurchCalendarScreen({ navigation }) {
   const [viewMode, setViewMode] = useState('month'); // month, week, list
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [calendarWidth, setCalendarWidth] = useState(0);
 
   const categories = ['All', 'Worship', 'Youth', 'Prayer', 'Outreach', 'Conference', 'Other'];
 
@@ -206,7 +210,11 @@ export default function ChurchCalendarScreen({ navigation }) {
 
   const getEventsForDate = (date) => {
     if (!date) return [];
-    const dateStr = date.toISOString().split('T')[0];
+    // Use timezone-safe date string formatting
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
     return filteredEvents.filter((event) => {
       // For multi-day events, show on all days they span
       if (event.isMultiDay && event.endDate) {
@@ -275,12 +283,20 @@ export default function ChurchCalendarScreen({ navigation }) {
   const renderMonthView = () => {
     const days = getDaysInMonth(currentDate);
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    // onLayout gives container width, but content area is smaller due to padding (16px each side)
+    const dayCellWidth = calendarWidth > 0 ? (calendarWidth - 32) / 7 : DAY_WIDTH;
 
     return (
-      <View style={styles.calendarContainer}>
+      <View 
+        style={styles.calendarContainer}
+        onLayout={(event) => {
+          const { width } = event.nativeEvent.layout;
+          setCalendarWidth(width);
+        }}
+      >
         <View style={styles.dayNamesRow}>
           {dayNames.map((day, index) => (
-            <View key={index} style={styles.dayNameCell}>
+            <View key={index} style={[styles.dayNameCell, { width: dayCellWidth }]}>
               <Text style={styles.dayNameText}>{day}</Text>
             </View>
           ))}
@@ -297,6 +313,7 @@ export default function ChurchCalendarScreen({ navigation }) {
                 key={dateKey}
                 style={[
                   styles.dayCell,
+                  { width: dayCellWidth, height: dayCellWidth },
                   isTodayDate && styles.todayCell,
                   isSelectedDate && styles.selectedCell,
                 ]}
@@ -392,7 +409,7 @@ export default function ChurchCalendarScreen({ navigation }) {
                             styles.weekEventItem,
                             { borderLeftColor: categoryColors[event.category] || categoryColors.Other },
                           ]}
-                          onPress={() => navigation.navigate('EventDetails', { event })}
+                          onPress={() => navigation.navigate('EventDetails', { eventId: event.id })}
                         >
                           <Text style={styles.weekEventTime}>{event.time}</Text>
                           <Text style={styles.weekEventTitle} numberOfLines={2}>
@@ -455,7 +472,7 @@ export default function ChurchCalendarScreen({ navigation }) {
                 <TouchableOpacity
                   key={`${event.id}-${dateStr}`}
                   style={styles.listEventCard}
-                  onPress={() => navigation.navigate('EventDetails', { event })}
+                  onPress={() => navigation.navigate('EventDetails', { eventId: event.id })}
                 >
                   <View
                     style={[
@@ -512,8 +529,20 @@ export default function ChurchCalendarScreen({ navigation }) {
   };
 
   const renderSelectedDateEvents = () => {
-    const dateStr = selectedDate.toISOString().split('T')[0];
-    const dayEvents = filteredEvents.filter((event) => {
+    // Use timezone-safe date string formatting
+    const year = selectedDate.getFullYear();
+    const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+    const day = String(selectedDate.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    
+    // Use full events array instead of filteredEvents to show events for any selected date
+    // but still apply category filter
+    let eventsToFilter = events;
+    if (selectedCategory !== 'All') {
+      eventsToFilter = events.filter((event) => event.category === selectedCategory);
+    }
+    
+    const dayEvents = eventsToFilter.filter((event) => {
       // For multi-day events, show on all days they span
       if (event.isMultiDay && event.endDate) {
         const eventStart = new Date(event.date);
@@ -550,7 +579,7 @@ export default function ChurchCalendarScreen({ navigation }) {
               <TouchableOpacity
                 key={`${event.id}-${dateStr}`}
                 style={styles.selectedEventCard}
-                onPress={() => navigation.navigate('EventDetails', { event })}
+                onPress={() => navigation.navigate('EventDetails', { eventId: event.id })}
               >
                 <LinearGradient
                   colors={[
@@ -716,60 +745,63 @@ export default function ChurchCalendarScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      >
-        {viewMode === 'month' && renderMonthView()}
-        {viewMode === 'week' && renderWeekView()}
-        {viewMode === 'list' && renderListView()}
-      </ScrollView>
+      <View style={styles.contentContainer}>
+        <ScrollView
+          style={styles.content}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+        >
+          {viewMode === 'month' && renderMonthView()}
+          {viewMode === 'week' && renderWeekView()}
+          {viewMode === 'list' && renderListView()}
+        </ScrollView>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.categoryFilter}
-        contentContainerStyle={styles.categoryFilterContent}
-      >
-        {categories.map((category) => (
-          <TouchableOpacity
-            key={category}
-            style={[
-              styles.categoryChip,
-              selectedCategory === category && styles.categoryChipActive,
-              selectedCategory === category &&
-                category !== 'All' && {
-                  backgroundColor: `${categoryColors[category]}20`,
-                  borderColor: categoryColors[category],
-                },
-            ]}
-            onPress={() => setSelectedCategory(category)}
-          >
-            {category !== 'All' && (
-              <View
-                style={[
-                  styles.categoryDot,
-                  { backgroundColor: categoryColors[category] },
-                ]}
-              />
-            )}
-            <Text
+        {(viewMode === 'month' || viewMode === 'week') && renderSelectedDateEvents()}
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoryFilter}
+          contentContainerStyle={styles.categoryFilterContent}
+        >
+          {categories.map((category) => (
+            <TouchableOpacity
+              key={category}
               style={[
-                styles.categoryChipText,
-                selectedCategory === category && styles.categoryChipTextActive,
+                styles.categoryChip,
+                selectedCategory === category && styles.categoryChipActive,
                 selectedCategory === category &&
                   category !== 'All' && {
-                    color: categoryColors[category],
+                    backgroundColor: `${categoryColors[category]}20`,
+                    borderColor: categoryColors[category],
                   },
               ]}
+              onPress={() => setSelectedCategory(category)}
             >
-              {category}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {(viewMode === 'month' || viewMode === 'week') && renderSelectedDateEvents()}
+              {category !== 'All' && (
+                <View
+                  style={[
+                    styles.categoryDot,
+                    { backgroundColor: categoryColors[category] },
+                  ]}
+                />
+              )}
+              <Text
+                style={[
+                  styles.categoryChipText,
+                  selectedCategory === category && styles.categoryChipTextActive,
+                  selectedCategory === category &&
+                    category !== 'All' && {
+                      color: categoryColors[category],
+                    },
+                ]}
+              >
+                {category}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
     </View>
   );
 }
@@ -872,8 +904,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  content: {
+  contentContainer: {
     flex: 1,
+    flexDirection: 'column',
+  },
+  content: {
+    flexShrink: 1,
   },
   calendarContainer: {
     backgroundColor: '#fff',
@@ -891,7 +927,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   dayNameCell: {
-    width: DAY_WIDTH - 4,
     alignItems: 'center',
     paddingVertical: 8,
   },
@@ -905,12 +940,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   dayCell: {
-    width: DAY_WIDTH - 4,
-    height: DAY_WIDTH - 4,
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingTop: 4,
-    margin: 2,
+    paddingHorizontal: 2,
     borderRadius: 8,
   },
   todayCell: {
@@ -1184,9 +1217,17 @@ const styles = StyleSheet.create({
   },
   selectedDateEvents: {
     backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    maxHeight: 300,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    maxHeight: 250,
+    flexShrink: 0,
   },
   selectedDateTitle: {
     fontSize: 18,
@@ -1197,7 +1238,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e5e7eb',
   },
   selectedEventsList: {
-    flex: 1,
+    maxHeight: 200,
   },
   selectedEventCard: {
     margin: 16,

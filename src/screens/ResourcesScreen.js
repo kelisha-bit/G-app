@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -161,7 +162,11 @@ export default function ResourcesScreen({ navigation }) {
 
   const handleResourcePress = async (resource) => {
     if (!resource.url) {
-      Alert.alert('No URL Available', 'This resource does not have a link.');
+      if (Platform.OS === 'web') {
+        window.alert('This resource does not have a link.');
+      } else {
+        Alert.alert('No URL Available', 'This resource does not have a link.');
+      }
       return;
     }
 
@@ -169,16 +174,26 @@ export default function ResourcesScreen({ navigation }) {
       // Track download/access
       await trackResourceAccess(resource.id);
 
-      // Open URL (browser will handle download for PDFs, etc.)
-      const supported = await Linking.canOpenURL(resource.url);
-      if (supported) {
-        await Linking.openURL(resource.url);
+      // Open URL - use window.open for web, Linking for mobile
+      if (Platform.OS === 'web') {
+        // For web, use window.open which works reliably
+        window.open(resource.url, '_blank', 'noopener,noreferrer');
       } else {
-        Alert.alert('Error', 'Cannot open this URL. Please check the link.');
+        // For mobile, use Linking API
+        const supported = await Linking.canOpenURL(resource.url);
+        if (supported) {
+          await Linking.openURL(resource.url);
+        } else {
+          Alert.alert('Error', 'Cannot open this URL. Please check the link.');
+        }
       }
     } catch (error) {
       console.error('Error opening resource:', error);
-      Alert.alert('Error', 'Failed to open resource. Please try again.');
+      if (Platform.OS === 'web') {
+        window.alert('Failed to open resource. Please try again.');
+      } else {
+        Alert.alert('Error', 'Failed to open resource. Please try again.');
+      }
     }
   };
 

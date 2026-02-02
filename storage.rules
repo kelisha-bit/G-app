@@ -20,6 +20,7 @@ service firebase.storage {
     }
     
     // Sermons - authenticated users can upload, everyone can read
+    // Supports both images and audio files
     match /sermons/{allPaths=**} {
       allow read: if true;
       allow write: if request.auth != null;
@@ -30,6 +31,32 @@ service firebase.storage {
     match /banner/{allPaths=**} {
       allow read: if true;
       allow write: if request.auth != null;
+    }
+    
+    // Church Staff photos - authenticated users can upload (app checks admin), everyone can read
+    // Note: App-level admin check is performed before upload
+    match /churchStaff/{allPaths=**} {
+      allow read: if true;  // Anyone can view staff photos
+      allow write: if request.auth != null;  // Authenticated users (app verifies admin)
+    }
+    
+    // News Articles images - authenticated users can upload (app checks admin), everyone can read
+    // Note: App-level admin check is performed before upload
+    match /newsArticles/{allPaths=**} {
+      allow read: if true;  // Anyone can view news article images
+      allow write: if request.auth != null;  // Authenticated users (app verifies admin)
+    }
+    
+    // Community Feed images - authenticated users can upload, everyone can read
+    match /communityFeed/{allPaths=**} {
+      allow read: if true;  // Anyone can view community feed images
+      allow write: if request.auth != null;  // Authenticated users can upload
+    }
+    
+    // Testimonies images - authenticated users can upload, everyone can read
+    match /testimonies/{allPaths=**} {
+      allow read: if true;  // Anyone can view testimony images
+      allow write: if request.auth != null;  // Authenticated users can upload
     }
   }
 }

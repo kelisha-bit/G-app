@@ -52,9 +52,21 @@ export default function DevotionalScreen({ navigation }) {
   // Load devotional when date changes
   useEffect(() => {
     loadDevotional();
-    checkBookmark();
-    loadUserNote();
   }, [selectedDate]);
+
+  // Load bookmark, like, and note status when devotional changes
+  useEffect(() => {
+    if (devotional) {
+      checkBookmark();
+      checkLike();
+      loadUserNote();
+    } else {
+      // Reset states when devotional is cleared
+      setBookmarked(false);
+      setLiked(false);
+      setUserNote('');
+    }
+  }, [devotional]);
 
   const generateWeekDays = () => {
     const today = new Date();
@@ -306,9 +318,60 @@ export default function DevotionalScreen({ navigation }) {
     }
   };
 
-  const handleLike = () => {
-    setLiked(!liked);
-    // Future: Save like to Firebase if needed
+  const checkLike = async () => {
+    if (!auth.currentUser || !devotional) {
+      setLiked(false);
+      return;
+    }
+    
+    try {
+      const likesQuery = query(
+        collection(db, 'devotionalLikes'),
+        where('userId', '==', auth.currentUser.uid),
+        where('devotionalId', '==', devotional.id)
+      );
+      const snapshot = await getDocs(likesQuery);
+      setLiked(!snapshot.empty);
+    } catch (error) {
+      console.error('Error checking like:', error);
+      setLiked(false);
+    }
+  };
+
+  const handleLike = async () => {
+    if (!auth.currentUser || !devotional) {
+      Alert.alert('Login Required', 'Please login to like devotionals');
+      return;
+    }
+
+    try {
+      if (liked) {
+        // Remove like
+        const likesQuery = query(
+          collection(db, 'devotionalLikes'),
+          where('userId', '==', auth.currentUser.uid),
+          where('devotionalId', '==', devotional.id)
+        );
+        const snapshot = await getDocs(likesQuery);
+        if (!snapshot.empty) {
+          await deleteDoc(doc(db, 'devotionalLikes', snapshot.docs[0].id));
+        }
+        setLiked(false);
+      } else {
+        // Add like
+        await addDoc(collection(db, 'devotionalLikes'), {
+          userId: auth.currentUser.uid,
+          devotionalId: devotional.id,
+          devotionalTitle: devotional.title,
+          devotionalDate: devotional.date,
+          createdAt: new Date().toISOString(),
+        });
+        setLiked(true);
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      Alert.alert('Error', 'Failed to update like');
+    }
   };
 
   const selectDate = (date) => {

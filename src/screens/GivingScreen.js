@@ -9,6 +9,8 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  Linking,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +25,7 @@ import {
   Timestamp 
 } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { initiateMobileMoneyPayment, isPaymentServiceConfigured } from '../utils/paymentService';
 
 export default function GivingScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -30,6 +33,8 @@ export default function GivingScreen({ navigation }) {
   const [customAmount, setCustomAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Tithe');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('Mobile Money');
+  const [selectedMobileMoneyProvider, setSelectedMobileMoneyProvider] = useState('MTN');
+  const [mobileMoneyPhone, setMobileMoneyPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(true);
   const [givingStats, setGivingStats] = useState({ total: 0, count: 0 });
@@ -38,9 +43,15 @@ export default function GivingScreen({ navigation }) {
   const quickAmounts = [50, 100, 200, 500];
   const categories = ['Tithe', 'Offering', 'Building Fund', 'Missions', 'Special'];
   const paymentMethods = [
+    { id: 'cash', name: 'Cash', subtitle: 'Pay with cash at church', icon: 'cash' },
     { id: 'momo', name: 'Mobile Money', subtitle: 'MTN, Vodafone, AirtelTigo', icon: 'phone-portrait' },
     { id: 'card', name: 'Card Payment', subtitle: 'Visa, Mastercard', icon: 'card' },
     { id: 'bank', name: 'Bank Transfer', subtitle: 'Direct bank transfer', icon: 'business' },
+  ];
+  const mobileMoneyProviders = [
+    { id: 'MTN', name: 'MTN Mobile Money', code: '024', color: '#FFCC00' },
+    { id: 'Vodafone', name: 'Vodafone Cash', code: '020', color: '#E60000' },
+    { id: 'AirtelTigo', name: 'AirtelTigo Money', code: '027', color: '#FF0000' },
   ];
 
   useEffect(() => {
@@ -94,6 +105,22 @@ export default function GivingScreen({ navigation }) {
       Alert.alert('Error', 'Please enter a valid amount');
       return;
     }
+    
+    // Validate mobile money details if Mobile Money is selected
+    if (selectedPaymentMethod === 'Mobile Money') {
+      if (!mobileMoneyPhone || mobileMoneyPhone.trim() === '') {
+        Alert.alert('Error', 'Please enter your mobile money phone number');
+        return;
+      }
+      // Validate phone number format (Ghana numbers: 10 digits starting with 0, or 9 digits without 0)
+      const phoneRegex = /^(0)?[0-9]{9}$/;
+      const cleanPhone = mobileMoneyPhone.replace(/\s+/g, '');
+      if (!phoneRegex.test(cleanPhone)) {
+        Alert.alert('Error', 'Please enter a valid Ghana phone number (e.g., 0244123456 or 244123456)');
+        return;
+      }
+    }
+    
     setShowConfirmModal(true);
   };
 
@@ -123,35 +150,132 @@ export default function GivingScreen({ navigation }) {
         transactionId: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
       };
 
+      // Add mobile money specific details
+      if (selectedPaymentMethod === 'Mobile Money') {
+        donationData.mobileMoneyProvider = selectedMobileMoneyProvider;
+        donationData.mobileMoneyPhone = mobileMoneyPhone.replace(/\s+/g, '');
+      }
+
       const docRef = await addDoc(collection(db, 'donations'), donationData);
 
-      // Simulate payment processing
-      // In production, this would integrate with actual payment gateway
-      setTimeout(async () => {
-        // Update donation status to completed
-        // In real implementation, this would be done by payment gateway webhook
+      // Process payment based on method
+      if (selectedPaymentMethod === 'Mobile Money') {
+        // Check if payment service is configured
+        const isConfigured = isPaymentServiceConfigured();
         
-        // Reload stats
-        await loadGivingStats();
-        
-        setLoading(false);
-        Alert.alert(
-          'Thank You! 🙏',
-          `Your donation of GH₵${amount} for ${selectedCategory} has been received.\n\nTransaction ID: ${donationData.transactionId}`,
-          [
-            {
-              text: 'View History',
-              onPress: () => navigation.navigate('GivingHistory'),
-            },
-            { text: 'Done', style: 'cancel' },
-          ]
-        );
+        if (!isConfigured) {
+          // Fallback to simulated payment if API not configured
+          console.warn('Payment API not configured. Using simulated payment.');
+          setTimeout(async () => {
+            await loadGivingStats();
+            setLoading(false);
+            Alert.alert(
+              'Payment Request Sent! 📱',
+              `A payment request for GH₵${amount} has been sent to your ${selectedMobileMoneyProvider} number: +233 ${mobileMoneyPhone.replace(/\s+/g, '')}\n\nPlease approve the payment on your phone when you receive the prompt.\n\nTransaction ID: ${donationData.transactionId}\n\nNote: Payment API not configured. This is a test transaction.`,
+              [
+                {
+                  text: 'View History',
+                  onPress: () => navigation.navigate('GivingHistory'),
+                },
+                { text: 'Done', style: 'cancel' },
+              ]
+            );
+            resetForm();
+          }, 2000);
+          return;
+        }
 
-        // Reset form
-        setSelectedAmount(null);
-        setCustomAmount('');
-        setSelectedCategory('Tithe');
-      }, 2000);
+        // Use actual payment API
+        try {
+          const paymentResult = await initiateMobileMoneyPayment({
+            amount: amount,
+            phone: mobileMoneyPhone.replace(/\s+/g, ''),
+            provider: selectedMobileMoneyProvider,
+            email: user.email,
+            transactionId: donationData.transactionId,
+            category: selectedCategory,
+          });
+
+          if (paymentResult.success && paymentResult.paymentLink) {
+            // Open payment link in browser
+            // On web, use window.open for better UX; on mobile, use Linking
+            if (Platform.OS === 'web') {
+              window.open(paymentResult.paymentLink, '_blank', 'noopener,noreferrer');
+            } else {
+              const canOpen = await Linking.canOpenURL(paymentResult.paymentLink);
+              if (canOpen) {
+                await Linking.openURL(paymentResult.paymentLink);
+              }
+            }
+
+            setLoading(false);
+            Alert.alert(
+              'Payment Link Opened! 📱',
+              `A payment page has been ${Platform.OS === 'web' ? 'opened in a new tab' : 'opened in your browser'}.\n\nPlease complete the payment using your ${selectedMobileMoneyProvider} mobile money wallet.\n\nTransaction ID: ${donationData.transactionId}`,
+              [
+                {
+                  text: 'View History',
+                  onPress: () => navigation.navigate('GivingHistory'),
+                },
+                { text: 'Done', style: 'cancel' },
+              ]
+            );
+            resetForm();
+          } else {
+            throw new Error('Failed to initiate payment');
+          }
+        } catch (error) {
+          console.error('Payment API error:', error);
+          setLoading(false);
+          Alert.alert(
+            'Payment Error',
+            `Failed to initiate payment: ${error.message}\n\nTransaction ID: ${donationData.transactionId}\n\nYour donation has been recorded. Please contact support if payment was not processed.`,
+            [
+              {
+                text: 'View History',
+                onPress: () => navigation.navigate('GivingHistory'),
+              },
+              { text: 'OK', style: 'cancel' },
+            ]
+          );
+        }
+      } else if (selectedPaymentMethod === 'Cash') {
+        // Cash payments don't need API processing
+        setTimeout(async () => {
+          await loadGivingStats();
+          setLoading(false);
+          Alert.alert(
+            'Cash Donation Recorded! 💵',
+            `Your cash donation of GH₵${amount} for ${selectedCategory} has been recorded.\n\nPlease bring your cash donation to church during service or contact the church office.\n\nTransaction ID: ${donationData.transactionId}`,
+            [
+              {
+                text: 'View History',
+                onPress: () => navigation.navigate('GivingHistory'),
+              },
+              { text: 'Done', style: 'cancel' },
+            ]
+          );
+          resetForm();
+        }, 1000);
+      } else {
+        // Other payment methods (Card, Bank Transfer) - can be extended later
+        setTimeout(async () => {
+          await loadGivingStats();
+          setLoading(false);
+          Alert.alert(
+            'Thank You! 🙏',
+            `Your donation of GH₵${amount} for ${selectedCategory} has been recorded.\n\nTransaction ID: ${donationData.transactionId}\n\nNote: Payment processing for ${selectedPaymentMethod} will be available soon.`,
+            [
+              {
+                text: 'View History',
+                onPress: () => navigation.navigate('GivingHistory'),
+              },
+              { text: 'Done', style: 'cancel' },
+            ]
+          );
+          resetForm();
+        }, 1000);
+      }
 
     } catch (error) {
       console.error('Error processing donation:', error);
@@ -162,6 +286,14 @@ export default function GivingScreen({ navigation }) {
 
   const handleViewHistory = () => {
     navigation.navigate('GivingHistory');
+  };
+
+  const resetForm = () => {
+    setSelectedAmount(null);
+    setCustomAmount('');
+    setSelectedCategory('Tithe');
+    setMobileMoneyPhone('');
+    setSelectedMobileMoneyProvider('MTN');
   };
 
   return (
@@ -307,6 +439,69 @@ export default function GivingScreen({ navigation }) {
           ))}
         </View>
 
+        {/* Mobile Money Details Section */}
+        {selectedPaymentMethod === 'Mobile Money' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Select Mobile Money Provider</Text>
+            <View style={styles.providerContainer}>
+              {mobileMoneyProviders.map((provider) => (
+                <TouchableOpacity
+                  key={provider.id}
+                  style={[
+                    styles.providerCard,
+                    selectedMobileMoneyProvider === provider.id && styles.providerCardSelected,
+                  ]}
+                  onPress={() => setSelectedMobileMoneyProvider(provider.id)}
+                >
+                  <View style={[
+                    styles.providerIcon,
+                    { backgroundColor: provider.color + '20' },
+                    selectedMobileMoneyProvider === provider.id && { backgroundColor: provider.color },
+                  ]}>
+                    <Ionicons 
+                      name="phone-portrait" 
+                      size={24} 
+                      color={selectedMobileMoneyProvider === provider.id ? '#fff' : provider.color} 
+                    />
+                  </View>
+                  <Text style={[
+                    styles.providerName,
+                    selectedMobileMoneyProvider === provider.id && styles.providerNameSelected,
+                  ]}>
+                    {provider.name}
+                  </Text>
+                  <Text style={styles.providerCode}>{provider.code}xxx xxxx</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.mobileMoneyInputContainer}>
+              <Text style={styles.sectionTitle}>Mobile Money Number</Text>
+              <View style={styles.phoneInputContainer}>
+                <View style={styles.countryCode}>
+                  <Text style={styles.countryCodeText}>+233</Text>
+                </View>
+                <TextInput
+                  style={styles.phoneInput}
+                  placeholder="Enter phone number"
+                  placeholderTextColor="#9ca3af"
+                  keyboardType="phone-pad"
+                  value={mobileMoneyPhone}
+                  onChangeText={(text) => {
+                    // Remove non-numeric characters except spaces
+                    const cleaned = text.replace(/[^0-9\s]/g, '');
+                    setMobileMoneyPhone(cleaned);
+                  }}
+                  maxLength={10}
+                />
+              </View>
+              <Text style={styles.phoneHint}>
+                Enter your {selectedMobileMoneyProvider} mobile money number (e.g., 0244123456)
+              </Text>
+            </View>
+          </View>
+        )}
+
         <View style={styles.givingStats}>
           <Text style={styles.statsTitle}>Your Giving This Year</Text>
           {statsLoading ? (
@@ -379,6 +574,18 @@ export default function GivingScreen({ navigation }) {
                 <Text style={styles.modalLabel}>Payment:</Text>
                 <Text style={styles.modalValue}>{selectedPaymentMethod}</Text>
               </View>
+              {selectedPaymentMethod === 'Mobile Money' && (
+                <>
+                  <View style={styles.modalRow}>
+                    <Text style={styles.modalLabel}>Provider:</Text>
+                    <Text style={styles.modalValue}>{selectedMobileMoneyProvider}</Text>
+                  </View>
+                  <View style={styles.modalRow}>
+                    <Text style={styles.modalLabel}>Phone:</Text>
+                    <Text style={styles.modalValue}>+233 {mobileMoneyPhone}</Text>
+                  </View>
+                </>
+              )}
             </View>
 
             <View style={styles.modalActions}>
@@ -758,5 +965,84 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  // Mobile Money styles
+  providerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  providerCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 15,
+    alignItems: 'center',
+    marginHorizontal: 5,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+  },
+  providerCardSelected: {
+    borderColor: '#6366f1',
+    backgroundColor: '#f0f9ff',
+  },
+  providerIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  providerName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1f2937',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  providerNameSelected: {
+    color: '#6366f1',
+  },
+  providerCode: {
+    fontSize: 10,
+    color: '#9ca3af',
+  },
+  mobileMoneyInputContainer: {
+    marginTop: 20,
+  },
+  phoneInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    overflow: 'hidden',
+  },
+  countryCode: {
+    paddingHorizontal: 15,
+    paddingVertical: 15,
+    backgroundColor: '#f9fafb',
+    borderRightWidth: 1,
+    borderRightColor: '#e5e7eb',
+  },
+  countryCodeText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  phoneInput: {
+    flex: 1,
+    paddingHorizontal: 15,
+    paddingVertical: 15,
+    fontSize: 16,
+    color: '#1f2937',
+  },
+  phoneHint: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 8,
+    paddingHorizontal: 5,
   },
 });

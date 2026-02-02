@@ -841,6 +841,13 @@ export default function BibleScreen({ navigation }) {
             <Ionicons name="book" size={28} color="#ef4444" />
             <Text style={styles.quickAccessText}>Browse Bible</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.quickAccessCard}
+            onPress={() => navigation.navigate('GoalsChallenges')}
+          >
+            <Ionicons name="flag" size={28} color="#f59e0b" />
+            <Text style={styles.quickAccessText}>Challenges</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </ScrollView>

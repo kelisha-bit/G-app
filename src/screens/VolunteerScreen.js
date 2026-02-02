@@ -384,6 +384,13 @@ export default function VolunteerScreen({ navigation }) {
           <Text style={styles.bannerText}>
             Use your gifts and talents to make a difference in our church and community
           </Text>
+          <TouchableOpacity
+            style={styles.challengeLink}
+            onPress={() => navigation.navigate('GoalsChallenges')}
+          >
+            <Ionicons name="flag" size={16} color="#6366f1" />
+            <Text style={styles.challengeLinkText}>Track your service goals</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.sectionTitle}>Available Opportunities</Text>
@@ -570,6 +577,22 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
     lineHeight: 20,
+    marginBottom: 12,
+  },
+  challengeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+  },
+  challengeLinkText: {
+    fontSize: 14,
+    color: '#6366f1',
+    fontWeight: '600',
+    marginLeft: 6,
   },
   sectionTitle: {
     fontSize: 18,

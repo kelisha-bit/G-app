@@ -30,9 +30,11 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log the error to console
-    console.error('Error caught by boundary:', error);
-    console.error('Error info:', errorInfo);
+    // Log the error to console (only in dev mode)
+    if (__DEV__) {
+      console.error('Error caught by boundary:', error);
+      console.error('Error info:', errorInfo);
+    }
     
     // Store error info for display
     this.setState({
@@ -40,8 +42,8 @@ class ErrorBoundary extends React.Component {
       errorInfo,
     });
 
-    // TODO: Log to error reporting service (e.g., Sentry, Firebase Crashlytics)
-    // Example:
+    // Error reporting can be integrated here with services like Sentry or Firebase Crashlytics
+    // Example integration:
     // if (Sentry) {
     //   Sentry.captureException(error, { extra: errorInfo });
     // }

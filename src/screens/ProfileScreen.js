@@ -35,12 +35,21 @@ export default function ProfileScreen({ navigation }) {
         where('toUserId', '==', user.uid)
       );
       
-      const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
-        const unreadCount = snapshot.docs.filter(doc => !doc.data().read).length;
-        setUnreadMessagesCount(unreadCount);
-      }, (error) => {
-        console.error('Error listening to messages:', error);
-      });
+      const unsubscribe = onSnapshot(
+        messagesQuery, 
+        (snapshot) => {
+          const unreadCount = snapshot.docs.filter(doc => !doc.data().read).length;
+          setUnreadMessagesCount(unreadCount);
+        }, 
+        (error) => {
+          // Only log permission errors in dev mode, handle gracefully
+          if (__DEV__) {
+            console.error('Error listening to messages:', error);
+          }
+          // Set count to 0 on error to prevent UI issues
+          setUnreadMessagesCount(0);
+        }
+      );
 
       return () => unsubscribe();
     }
@@ -154,6 +163,20 @@ export default function ProfileScreen({ navigation }) {
       icon: 'school-outline',
       color: '#8b5cf6',
       screen: 'DiscipleshipTraining',
+    },
+    {
+      id: 13,
+      title: 'Church Staff',
+      icon: 'people-outline',
+      color: '#6366f1',
+      screen: 'ChurchStaff',
+    },
+    {
+      id: 14,
+      title: 'Service Leaders',
+      icon: 'calendar-outline',
+      color: '#10b981',
+      screen: 'ServiceLeaders',
     },
   ];
 

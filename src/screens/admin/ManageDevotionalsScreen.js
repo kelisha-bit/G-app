@@ -25,6 +25,7 @@ import {
 } from 'firebase/firestore';
 import { fetchBibleVerse, isValidVerseReference } from '../../utils/bibleApi';
 import { generateDevotionalContent } from '../../utils/aiService';
+import { sendDevotionalNotification } from '../../utils/sendPushNotification';
 
 export default function ManageDevotionalsScreen({ navigation }) {
   const [devotionals, setDevotionals] = useState([]);
@@ -186,11 +187,30 @@ export default function ManageDevotionalsScreen({ navigation }) {
         await updateDoc(doc(db, 'devotionals', selectedDevotional.id), devotionalData);
         Alert.alert('Success', 'Devotional updated successfully');
       } else {
-        await addDoc(collection(db, 'devotionals'), {
+        const docRef = await addDoc(collection(db, 'devotionals'), {
           ...devotionalData,
           createdAt: new Date().toISOString(),
         });
-        Alert.alert('Success', 'Devotional created successfully');
+        
+        // Send push notification for new devotionals
+        try {
+          const result = await sendDevotionalNotification({
+            id: docRef.id,
+            title: title.trim(),
+          });
+          
+          if (result.success) {
+            Alert.alert(
+              '✅ Success!',
+              `Devotional created and notification sent to ${result.sentCount} devices!`
+            );
+          } else {
+            Alert.alert('Success', 'Devotional created successfully (notification failed)');
+          }
+        } catch (notifError) {
+          console.error('Error sending devotional notification:', notifError);
+          Alert.alert('Success', 'Devotional created successfully (notification failed)');
+        }
       }
 
       setModalVisible(false);
